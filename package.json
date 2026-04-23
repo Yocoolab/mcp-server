@@ -1,0 +1,66 @@
+{
+  "name": "@yocoolab/mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server that exposes Yocoolab feedback threads, design selections, and activity events as tools for Claude Code and other MCP-compatible clients.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "claude-code",
+    "yocoolab",
+    "design-handoff",
+    "feedback",
+    "ai-tools"
+  ],
+  "homepage": "https://github.com/yocoolab/mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/yocoolab/mcp-server/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yocoolab/mcp-server.git"
+  },
+  "license": "Apache-2.0",
+  "author": "Yocoolab",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "yocoolab-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "hooks",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "postbuild": "chmod +x dist/index.js",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "uuid": "^9.0.0",
+    "ws": "^8.18.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/uuid": "^9.0.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.4.0",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
