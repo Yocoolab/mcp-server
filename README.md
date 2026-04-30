@@ -24,10 +24,12 @@ With this installed, your AI coding assistant can:
 One command:
 
 ```bash
-npx -y @yocoolab/mcp-server@1 init
+npx -y @yocoolab/mcp-server@2 setup
 ```
 
-The `init` wizard prompts for your Yocoolab JWT, writes a working `~/.mcp.json` with correct paths and `npx` invocation, and adds `.mcp.json` to your project's `.gitignore` if it's a git repo. Then restart Claude Code (or your MCP client of choice) and the `yocoolab` server appears with all tools available.
+The `setup` wizard auto-detects your installed AI agents (Claude Code, Cursor, Cline, Roo Code, Windsurf) and writes the correct MCP config for each. Restart your agent and the `yocoolab` server appears with all tools available.
+
+> `init` is kept as an alias for `setup` for backwards compatibility with v1.0.x install instructions.
 
 If you'd rather configure manually, the equivalent `~/.mcp.json` looks like:
 
@@ -36,7 +38,7 @@ If you'd rather configure manually, the equivalent `~/.mcp.json` looks like:
   "mcpServers": {
     "yocoolab": {
       "command": "npx",
-      "args": ["-y", "@yocoolab/mcp-server@1"],
+      "args": ["-y", "@yocoolab/mcp-server@2"],
       "env": {
         "YOCOOLAB_API_URL": "https://app.yocoolab.com",
         "YOCOOLAB_TOKEN": "<your-yocoolab-jwt>",
@@ -49,11 +51,11 @@ If you'd rather configure manually, the equivalent `~/.mcp.json` looks like:
 }
 ```
 
-The `@1` version pin keeps you on the v1 major line — you'll receive bug fixes and new features automatically, but a future v2 with breaking changes won't break your setup.
+The `@2` version pin keeps you on the v2 major line — you'll receive bug fixes and new features automatically, but a future v3 with breaking changes won't break your setup. (Pin to `@1` if you need Node 18 support — v1.x will receive security patches for 90 days after v2.0.)
 
 ## Requirements
 
-- **Node.js 18 or newer.** We test on Node 18, 20, and 22 in CI. We support whichever Node.js versions are currently in [Active LTS or Maintenance LTS](https://nodejs.org/en/about/previous-releases) status, and drop versions within 30 days of their EOL.
+- **Node.js 20 or newer.** We test on Node 20 and 22 in CI. We support whichever Node.js versions are currently in [Active LTS or Maintenance LTS](https://nodejs.org/en/about/previous-releases) status, and drop versions within 30 days of their EOL. Node 18 was dropped in v2.0.0 (EOL April 2025).
 - **A Yocoolab account and JWT token** — get yours from the Yocoolab Chrome extension settings, or via your account at [app.yocoolab.com](https://app.yocoolab.com).
 - **A GitHub personal access token** with `repo` scope, if you want to use the PR-creation tools.
 
@@ -61,20 +63,20 @@ The `@1` version pin keeps you on the v1 major line — you'll receive bug fixes
 
 | Env var | Required | Default | Description |
 |---|---|---|---|
-| `YOCOOLAB_TOKEN` | yes | — | Your Yocoolab JWT, copied from the Chrome extension |
+| `YOCOOLAB_TOKEN` | no | — | Your Yocoolab JWT (from the Chrome extension). When unset, thread feedback tools are disabled but bridge / companion / activity tools still work. |
 | `YOCOOLAB_API_URL` | no | `https://app.yocoolab.com` | Yocoolab API base URL |
 | `GITHUB_TOKEN` | only for PR tools | — | GitHub PAT with `repo` scope |
 | `YOCOOLAB_BRIDGE_PORT` | no | `9800` | Local port for the HTTP bridge to the Chrome extension |
 | `YOCOOLAB_BRIDGE_WORKSPACE` | no | `process.cwd()` | Absolute path to your project workspace, used to resolve file references in selections |
-| `DEBUG` | no | — | Set `DEBUG=yocoolab:*` for verbose diagnostic logging to stderr |
+| `YOCOOLAB_AGENT_NAME` | no | `Claude Code` | Display name shown in the Chrome extension's agent picker |
+| `YOCOOLAB_AGENT_TYPE` | no | `claude-code` | Agent type identifier (`claude-code`, `roo`, `cline`, `cursor`, `windsurf`, or `custom`) |
 
 ## CLI
 
 ```
-yocoolab-mcp           Run the MCP server (used by Claude Code via .mcp.json)
-yocoolab-mcp init      Interactive setup — writes ~/.mcp.json
-yocoolab-mcp --version Print version, Node, and platform info
-yocoolab-mcp --doctor  Diagnose your environment (validates JWT, API reachability, ports)
+yocoolab-mcp           Run the MCP server (used by your agent via .mcp.json)
+yocoolab-mcp setup     Interactive setup — auto-detects agents and writes their configs
+yocoolab-mcp init      Alias for `setup` (backwards compatible with v1.0.x)
 yocoolab-mcp --help    Show this help
 ```
 
@@ -95,11 +97,11 @@ For full tool descriptions and parameters, your MCP client will list them after 
 
 ## Troubleshooting
 
-**`yocoolab-mcp: command not found`** — make sure you're using v1.0.1 or newer. Run `npx -y @yocoolab/mcp-server@latest init` to get the current release.
+**`yocoolab-mcp: command not found`** — make sure you're on v1.0.1 or newer. Run `npx -y @yocoolab/mcp-server@latest setup` to get the current release.
 
-**`Error: YOCOOLAB_TOKEN environment variable is required`** — the env block in your `.mcp.json` doesn't have a token. Run `yocoolab-mcp init` to (re)generate the config.
+**`[yocoolab] Warning: YOCOOLAB_TOKEN not set`** — thread feedback tools are disabled without a token, but bridge / companion / activity tools still work. To enable everything, run `yocoolab-mcp setup` to (re)generate the config with your JWT.
 
-**Tools don't appear in Claude Code after install** — restart Claude Code completely (quit & reopen). MCP servers are loaded at startup. If they still don't appear, run `yocoolab-mcp --doctor` to diagnose.
+**Tools don't appear in your agent after install** — restart your agent completely (quit & reopen). MCP servers load at startup.
 
 **`Port 9800 is already in use`** — another instance of the MCP server is running, or another app has the port. Set `YOCOOLAB_BRIDGE_PORT` to a different value (e.g. `9801`) in your `.mcp.json`.
 

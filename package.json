@@ -1,6 +1,6 @@
 {
   "name": "@yocoolab/mcp-server",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "MCP server that exposes Yocoolab feedback threads, design selections, and activity events as tools for Claude Code and other MCP-compatible clients.",
   "keywords": [
     "mcp",
@@ -55,10 +55,10 @@
     "@types/uuid": "^9.0.0",
     "@types/ws": "^8.5.10",
     "typescript": "^5.4.0",
-    "vitest": "^4.0.18"
+    "vitest": "^3.2.4"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "publishConfig": {
     "access": "public"
