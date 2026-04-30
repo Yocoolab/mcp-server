@@ -95,14 +95,23 @@ function checkProcess(name: string): boolean {
   }
 }
 
-function buildMcpConfig(agentName: string, agentType: string): Record<string, unknown> {
+interface SetupTokens {
+  yocoolabToken?: string;
+  githubToken?: string;
+}
+
+function buildMcpConfig(
+  agentName: string,
+  agentType: string,
+  tokens: SetupTokens = {}
+): Record<string, unknown> {
   return {
     command: 'npx',
     args: ['-y', '@yocoolab/mcp-server@2'],
     env: {
       YOCOOLAB_API_URL: 'https://app.yocoolab.com',
-      YOCOOLAB_TOKEN: '<your token — get from Chrome extension settings>',
-      GITHUB_TOKEN: '<your GitHub PAT — for PR creation>',
+      YOCOOLAB_TOKEN: tokens.yocoolabToken || '<your token — get from Chrome extension settings>',
+      GITHUB_TOKEN: tokens.githubToken || '<your GitHub PAT — for PR creation>',
       YOCOOLAB_BRIDGE_PORT: '9800',
       YOCOOLAB_BRIDGE_WORKSPACE: CWD,
       YOCOOLAB_AGENT_NAME: agentName,
@@ -111,7 +120,32 @@ function buildMcpConfig(agentName: string, agentType: string): Record<string, un
   };
 }
 
-function writeConfig(configPath: string, agentName: string, agentType: string): boolean {
+/** Parse --token=VAL / --github-token=VAL CLI flags from process.argv. */
+function parseTokenFlags(argv: readonly string[]): SetupTokens {
+  const tokens: SetupTokens = {};
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--token' && argv[i + 1]) {
+      tokens.yocoolabToken = argv[i + 1];
+      i++;
+    } else if (arg.startsWith('--token=')) {
+      tokens.yocoolabToken = arg.slice('--token='.length);
+    } else if (arg === '--github-token' && argv[i + 1]) {
+      tokens.githubToken = argv[i + 1];
+      i++;
+    } else if (arg.startsWith('--github-token=')) {
+      tokens.githubToken = arg.slice('--github-token='.length);
+    }
+  }
+  return tokens;
+}
+
+function writeConfig(
+  configPath: string,
+  agentName: string,
+  agentType: string,
+  tokens: SetupTokens = {}
+): boolean {
   const dir = path.dirname(configPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -128,7 +162,7 @@ function writeConfig(configPath: string, agentName: string, agentType: string): 
   }
 
   const servers = (existing.mcpServers || {}) as Record<string, unknown>;
-  servers.yocoolab = buildMcpConfig(agentName, agentType);
+  servers.yocoolab = buildMcpConfig(agentName, agentType, tokens);
   existing.mcpServers = servers;
 
   fs.writeFileSync(configPath, JSON.stringify(existing, null, 2) + '\n');
@@ -146,7 +180,12 @@ function prompt(question: string): Promise<string> {
 }
 
 export async function runSetup(): Promise<void> {
+  const tokens = parseTokenFlags(process.argv.slice(2));
+
   console.log('\n  🔮 Yocoolab MCP Setup\n');
+  if (tokens.yocoolabToken) {
+    console.log('  Using token from --token flag (no manual paste needed).\n');
+  }
   console.log('  Detecting AI coding agents...\n');
 
   const agents = detectAgents();
@@ -202,7 +241,7 @@ export async function runSetup(): Promise<void> {
 
   for (const agent of toConfigure) {
     try {
-      writeConfig(agent.configPath, agent.name, agent.type);
+      writeConfig(agent.configPath, agent.name, agent.type, tokens);
       const relativePath = path.relative(CWD, agent.configPath);
       const displayPath = relativePath.startsWith('.') || !relativePath.startsWith('/') ? relativePath : agent.configPath;
       console.log(`  ✅ ${agent.name} → ${displayPath}`);
@@ -212,10 +251,17 @@ export async function runSetup(): Promise<void> {
   }
 
   console.log('\n  Next steps:');
-  console.log('  1. Replace <your token> with your Yocoolab JWT');
-  console.log('     (find it in Chrome extension → Settings → API Token)');
-  console.log('  2. Replace <your GitHub PAT> with a GitHub personal access token');
-  console.log('     (needs repo write permissions for PR creation)');
-  console.log('  3. Open your agent — Yocoolab tools load automatically');
+  let stepNumber = 1;
+  if (!tokens.yocoolabToken) {
+    console.log(`  ${stepNumber}. Replace <your token> with your Yocoolab JWT`);
+    console.log('     (find it in Chrome extension → Settings → API Token)');
+    stepNumber++;
+  }
+  if (!tokens.githubToken) {
+    console.log(`  ${stepNumber}. (Optional) Replace <your GitHub PAT> with a GitHub personal access token`);
+    console.log('     (needs repo write permissions for PR-creation tools)');
+    stepNumber++;
+  }
+  console.log(`  ${stepNumber}. Restart your agent — Yocoolab tools load automatically`);
   console.log('\n  Docs: https://yocoolab.com/docs/ai-agents\n');
 }

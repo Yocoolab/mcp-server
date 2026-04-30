@@ -4,6 +4,18 @@ All notable changes to `@yocoolab/mcp-server` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] — 2026-04-30
+
+### Added
+- **`--token` and `--github-token` CLI flags** for the setup wizard. Lets the wizard accept the Yocoolab JWT (and optional GitHub PAT) inline so the user doesn't have to paste them into the generated config:
+  ```bash
+  npx -y @yocoolab/mcp-server@2 setup --token=<jwt>
+  ```
+  The flags are the underlying contract for the new one-click "Install for Claude Code" button in the Yocoolab Chrome extension, which mints a one-time session and hands it off to a dashboard install page that writes `.mcp.json` for the user — no terminal at all on Chromium browsers.
+
+### Changed
+- Setup wizard's "Next steps" output now adapts to which flags were passed: skips the JWT-paste step when `--token` was provided, and skips the GitHub-PAT step when `--github-token` was provided (or always shows it as Optional).
+
 ## [2.0.0] — 2026-04-30
 
 ### BREAKING CHANGES
@@ -47,6 +59,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Deployment tools: `get_deployment_preview`.
 - Pendo integration tools: `pendo_list_guides`, `pendo_page_analytics`, `pendo_feature_usage`, `pendo_track_event`.
 
+[2.1.0]: https://github.com/Yocoolab/mcp-server/releases/tag/v2.1.0
 [2.0.0]: https://github.com/Yocoolab/mcp-server/releases/tag/v2.0.0
 [1.0.1]: https://github.com/Yocoolab/mcp-server/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Yocoolab/mcp-server/releases/tag/v1.0.0
