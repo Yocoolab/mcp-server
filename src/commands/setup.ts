@@ -98,7 +98,7 @@ function checkProcess(name: string): boolean {
 function buildMcpConfig(agentName: string, agentType: string): Record<string, unknown> {
   return {
     command: 'npx',
-    args: ['-y', '@yocoolab/mcp-server@1'],
+    args: ['-y', '@yocoolab/mcp-server@2'],
     env: {
       YOCOOLAB_API_URL: 'https://app.yocoolab.com',
       YOCOOLAB_TOKEN: '<your token — get from Chrome extension settings>',

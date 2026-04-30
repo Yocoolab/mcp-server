@@ -4,7 +4,11 @@ All notable changes to `@yocoolab/mcp-server` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] — 2026-04-30
+## [2.0.0] — 2026-04-30
+
+### BREAKING CHANGES
+- **Dropped Node.js 18.** The minimum supported version is now Node 20. Node 18 went EOL on 2025-04-30 and is no longer in our test matrix. Per our [support policy](./CONTRIBUTING.md), we drop Node versions within 30 days of EOL.
+  - Migration: upgrade to Node 20 or newer (`nvm install 20 && nvm use 20`, or your preferred version manager). The Yocoolab tooling itself is unchanged — `npx -y @yocoolab/mcp-server@2 setup` works the same as before.
 
 ### Added
 - **Multi-agent setup wizard.** `yocoolab-mcp setup` auto-detects Claude Code, Cursor, Cline, Roo Code, and Windsurf, and writes the correct MCP config for each. (`init` is kept as an alias for backwards compatibility.)
@@ -43,6 +47,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Deployment tools: `get_deployment_preview`.
 - Pendo integration tools: `pendo_list_guides`, `pendo_page_analytics`, `pendo_feature_usage`, `pendo_track_event`.
 
-[1.1.0]: https://github.com/Yocoolab/mcp-server/releases/tag/v1.1.0
+[2.0.0]: https://github.com/Yocoolab/mcp-server/releases/tag/v2.0.0
 [1.0.1]: https://github.com/Yocoolab/mcp-server/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Yocoolab/mcp-server/releases/tag/v1.0.0

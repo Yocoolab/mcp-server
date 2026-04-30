@@ -24,7 +24,7 @@ npm run build
 npm test
 ```
 
-You'll need Node.js 18 or newer. Currently active LTS lines (18, 20, 22) are tested in CI.
+You'll need Node.js 20 or newer. Active LTS lines (20, 22) are tested in CI. Node 18 (EOL April 2025) was dropped in v2.0.0.
 
 ## Branching and commits
 
@@ -46,7 +46,7 @@ You'll need Node.js 18 or newer. Currently active LTS lines (18, 20, 22) are tes
 2. Make your change. **Add or update tests** — the vitest suite lives in `src/__tests__/`.
 3. Run `npm run build` and `npm test` locally before pushing.
 4. Open a PR against `main`. Fill out the PR template.
-5. CI must pass on Node 18, 20, and 22.
+5. CI must pass on Node 20 and 22.
 6. A maintainer will review. At least one approval required to merge.
 7. Squash-merge into `main`.
 

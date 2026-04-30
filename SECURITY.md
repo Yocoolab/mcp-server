@@ -17,7 +17,8 @@ We provide security fixes for the latest minor release of the current major vers
 
 | Version | Supported |
 |---------|-----------|
-| 1.x     | ✅        |
+| 2.x     | ✅        |
+| 1.x     | ✅ (security patches only, until 90 days after v2.0 release) |
 
 ## Scope
 

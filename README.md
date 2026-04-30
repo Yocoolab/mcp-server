@@ -24,7 +24,7 @@ With this installed, your AI coding assistant can:
 One command:
 
 ```bash
-npx -y @yocoolab/mcp-server@1 setup
+npx -y @yocoolab/mcp-server@2 setup
 ```
 
 The `setup` wizard auto-detects your installed AI agents (Claude Code, Cursor, Cline, Roo Code, Windsurf) and writes the correct MCP config for each. Restart your agent and the `yocoolab` server appears with all tools available.
@@ -38,7 +38,7 @@ If you'd rather configure manually, the equivalent `~/.mcp.json` looks like:
   "mcpServers": {
     "yocoolab": {
       "command": "npx",
-      "args": ["-y", "@yocoolab/mcp-server@1"],
+      "args": ["-y", "@yocoolab/mcp-server@2"],
       "env": {
         "YOCOOLAB_API_URL": "https://app.yocoolab.com",
         "YOCOOLAB_TOKEN": "<your-yocoolab-jwt>",
@@ -51,11 +51,11 @@ If you'd rather configure manually, the equivalent `~/.mcp.json` looks like:
 }
 ```
 
-The `@1` version pin keeps you on the v1 major line — you'll receive bug fixes and new features automatically, but a future v2 with breaking changes won't break your setup.
+The `@2` version pin keeps you on the v2 major line — you'll receive bug fixes and new features automatically, but a future v3 with breaking changes won't break your setup. (Pin to `@1` if you need Node 18 support — v1.x will receive security patches for 90 days after v2.0.)
 
 ## Requirements
 
-- **Node.js 18 or newer.** We test on Node 18, 20, and 22 in CI. We support whichever Node.js versions are currently in [Active LTS or Maintenance LTS](https://nodejs.org/en/about/previous-releases) status, and drop versions within 30 days of their EOL.
+- **Node.js 20 or newer.** We test on Node 20 and 22 in CI. We support whichever Node.js versions are currently in [Active LTS or Maintenance LTS](https://nodejs.org/en/about/previous-releases) status, and drop versions within 30 days of their EOL. Node 18 was dropped in v2.0.0 (EOL April 2025).
 - **A Yocoolab account and JWT token** — get yours from the Yocoolab Chrome extension settings, or via your account at [app.yocoolab.com](https://app.yocoolab.com).
 - **A GitHub personal access token** with `repo` scope, if you want to use the PR-creation tools.
 
@@ -97,7 +97,7 @@ For full tool descriptions and parameters, your MCP client will list them after 
 
 ## Troubleshooting
 
-**`yocoolab-mcp: command not found`** — make sure you're using v1.0.1 or newer. Run `npx -y @yocoolab/mcp-server@latest setup` to get the current release.
+**`yocoolab-mcp: command not found`** — make sure you're on v1.0.1 or newer. Run `npx -y @yocoolab/mcp-server@latest setup` to get the current release.
 
 **`[yocoolab] Warning: YOCOOLAB_TOKEN not set`** — thread feedback tools are disabled without a token, but bridge / companion / activity tools still work. To enable everything, run `yocoolab-mcp setup` to (re)generate the config with your JWT.
 
