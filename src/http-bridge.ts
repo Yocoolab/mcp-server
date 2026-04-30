@@ -22,6 +22,27 @@ const MIME_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
 };
 
+export interface ConnectedAgent {
+  id: string;
+  name: string;
+  type: string; // 'claude-code' | 'roo' | 'cline' | 'cursor' | 'windsurf' | 'custom'
+  cwd?: string;
+  connectedAt: number;
+  lastHeartbeat: number;
+}
+
+const agentRegistry = new Map<string, ConnectedAgent>();
+
+// Clean up stale agents (no heartbeat in 30s)
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, agent] of agentRegistry) {
+    if (now - agent.lastHeartbeat > 30_000) {
+      agentRegistry.delete(id);
+    }
+  }
+}, 10_000);
+
 export type ThreadUpdateEmitter = (threadId: string, eventType: string, data: Record<string, unknown>) => void;
 
 export interface CompanionMessage {
@@ -32,6 +53,9 @@ export interface CompanionMessage {
   screenshot?: string;
   elementContext?: Record<string, unknown>;
   voice?: boolean;
+  // Multi-context: arrays when user gathers multiple items before sending
+  screenshots?: string[];
+  elements?: Array<Record<string, unknown>>;
 }
 
 export interface BridgeResult {
@@ -306,6 +330,7 @@ export function startHttpBridge(
           bridge: {
             selections: store.count(),
             sseClients: sseClients.size,
+            agents: Array.from(agentRegistry.values()),
           },
           monitor: {
             events: activityEventStore.count(),
@@ -314,6 +339,50 @@ export function startHttpBridge(
           uptime: process.uptime(),
         })
       );
+      return;
+    }
+
+    // Agent registry: list connected agents
+    if (req.method === 'GET' && url.pathname === '/agents') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ agents: Array.from(agentRegistry.values()) }));
+      return;
+    }
+
+    // Agent registry: register/heartbeat
+    if (req.method === 'POST' && url.pathname === '/agents/register') {
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          const id = data.id || uuidv4();
+          const agent: ConnectedAgent = {
+            id,
+            name: data.name || 'Unknown Agent',
+            type: data.type || 'custom',
+            cwd: data.cwd,
+            connectedAt: agentRegistry.get(id)?.connectedAt || Date.now(),
+            lastHeartbeat: Date.now(),
+          };
+          agentRegistry.set(id, agent);
+          process.stderr.write(`[yocoolab-bridge] Agent registered: ${agent.name} (${agent.type})\n`);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, agent }));
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        }
+      });
+      return;
+    }
+
+    // Agent registry: unregister
+    if (req.method === 'DELETE' && url.pathname.startsWith('/agents/')) {
+      const agentId = url.pathname.split('/agents/')[1];
+      agentRegistry.delete(agentId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
       return;
     }
 
@@ -358,6 +427,9 @@ export function startHttpBridge(
             screenshot: data.screenshot,
             elementContext: data.elementContext,
             voice: data.voice,
+            // Multi-context arrays (when user gathers multiple items before sending)
+            screenshots: Array.isArray(data.screenshots) ? data.screenshots : undefined,
+            elements: Array.isArray(data.elements) ? data.elements : undefined,
           };
 
           companionMessages.push(msg);
@@ -383,6 +455,13 @@ export function startHttpBridge(
       const msgs = getCompanionMessages();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ messages: msgs }));
+      return;
+    }
+
+    // Peek without draining - used by hooks so withCompanion() can still drain
+    if (req.method === 'GET' && url.pathname === '/companion/peek') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ messages: [...companionMessages] }));
       return;
     }
 
@@ -430,22 +509,38 @@ export function startHttpBridge(
     res.end('Not Found');
   });
 
-  server.on('error', (err: NodeJS.ErrnoException) => {
-    if (err.code === 'EADDRINUSE') {
-      process.stderr.write(
-        `[yocoolab] Port ${port} is already in use. ` +
-          `Is another instance running? Set YOCOOLAB_BRIDGE_PORT to a different port.\n`
-      );
-      return;
-    }
-    throw err;
-  });
+  // Retry logic: if port is briefly held by a dying process, retry up to 5 times
+  let retryCount = 0;
+  const MAX_RETRIES = 5;
+  const RETRY_DELAY_MS = 1500;
 
-  server.listen(port, '127.0.0.1', () => {
-    process.stderr.write(`[yocoolab] HTTP bridge + monitor listening on http://127.0.0.1:${port}\n`);
-    process.stderr.write(`[yocoolab] Dashboard: http://localhost:${port}/dashboard/\n`);
-    process.stderr.write(`[yocoolab] Activity WS: ws://127.0.0.1:${port}/ws/activity\n`);
-  });
+  function tryListen(): void {
+    server.once('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && retryCount < MAX_RETRIES) {
+        retryCount++;
+        process.stderr.write(
+          `[yocoolab] Port ${port} in use, retrying (${retryCount}/${MAX_RETRIES}) in ${RETRY_DELAY_MS}ms...\n`
+        );
+        setTimeout(tryListen, RETRY_DELAY_MS);
+        return;
+      }
+      if (err.code === 'EADDRINUSE') {
+        process.stderr.write(
+          `[yocoolab] Port ${port} still in use after ${MAX_RETRIES} retries. Bridge not started.\n`
+        );
+        return;
+      }
+      throw err;
+    });
+
+    server.listen(port, '127.0.0.1', () => {
+      process.stderr.write(`[yocoolab] HTTP bridge + monitor listening on http://127.0.0.1:${port}\n`);
+      process.stderr.write(`[yocoolab] Dashboard: http://localhost:${port}/dashboard/\n`);
+      process.stderr.write(`[yocoolab] Activity WS: ws://127.0.0.1:${port}/ws/activity\n`);
+    });
+  }
+
+  tryListen();
 
   return { server, emitThreadUpdate, getCompanionMessages, postCompanionReply, onActivityEvent, onCompanionMessage };
 }

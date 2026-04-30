@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-If you discover a security issue in `@yocoolab/mcp-server`, **please do not open a public GitHub issue**. Instead, email **support@attune-dating.com** with:
+If you discover a security issue in `@yocoolab/mcp-server`, **please do not open a public GitHub issue**. Instead, email **contact@yocoolab.com** with:
 
 - A description of the vulnerability
 - Steps to reproduce, or a proof-of-concept

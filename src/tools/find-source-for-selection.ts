@@ -39,7 +39,7 @@ export function registerFindSourceForSelection(
   server: McpServer,
   store: SelectionStore,
   workspaceRoot: string,
-  api: YocoolabApiClient
+  api: YocoolabApiClient | null
 ): void {
   server.tool(
     'find_source_for_selection',
@@ -63,6 +63,12 @@ export function registerFindSourceForSelection(
 
       // If thread_id provided, build payload from stored thread context
       if (thread_id) {
+        if (!api) {
+          return {
+            content: [{ type: 'text' as const, text: 'Error: YOCOOLAB_TOKEN is required to look up thread context.' }],
+            isError: true,
+          };
+        }
         try {
           const thread = await api.getThread(thread_id);
           payload = threadContextToPayload(thread);

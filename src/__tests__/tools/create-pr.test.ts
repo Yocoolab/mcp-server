@@ -28,7 +28,12 @@ function makeGithub(): GitHubClient {
   } as unknown as GitHubClient;
 }
 
-// FIXME(v1.0.1): mock api missing methods (getWorkingBranch, notifyParticipants) added when working-branch flow was introduced. Re-enable after extending the mock to match the current YocoolabApiClient surface.
+// FIXME(v1.1.0): assertions are stale against the working-branch flow added later.
+// The current source calls `github.createPullRequest(owner, repo, branch, 'Yocoolab Feedback Fixes', '', files, baseBranch)`
+// followed by a separate `github.updatePullRequestBody(...)`, but these tests still expect args.title/args.body
+// to be passed directly to createPullRequest. The mocks also don't have `getWorkingBranch`, `createWorkingBranch`,
+// `updateWorkingBranch`, `branchExists`, `commitToExistingBranch`, `getPullRequestBody`, or `updatePullRequestBody`.
+// To re-enable: rewrite assertions for the two-step PR-creation flow + extend both mocks. Tracking: TODO-issue.
 describe.skip('handleCreatePr', () => {
   const baseArgs = {
     thread_id: 'thread-1',

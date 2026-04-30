@@ -39,7 +39,7 @@ export function registerGetElementContext(
   server: McpServer,
   store: SelectionStore,
   workspaceRoot: string,
-  api: YocoolabApiClient
+  api: YocoolabApiClient | null
 ): void {
   server.tool(
     'get_element_context',
@@ -66,9 +66,15 @@ export function registerGetElementContext(
     },
     async ({ correlationId, thread_id, includePrompt }) => {
       let payload: ElementSelectedPayload | null | undefined;
-      let threadData: Awaited<ReturnType<typeof api.getThread>> | undefined;
+      let threadData: Record<string, any> | undefined;
 
       if (thread_id) {
+        if (!api) {
+          return {
+            content: [{ type: 'text' as const, text: 'Error: YOCOOLAB_TOKEN is required to look up thread context.' }],
+            isError: true,
+          };
+        }
         try {
           threadData = await api.getThread(thread_id);
           payload = threadContextToPayload(threadData);
@@ -197,7 +203,7 @@ export function registerGetElementContext(
                 threadId: threadData.id,
                 repo: threadData.repo,
                 branch: threadData.branch,
-                messages: threadData.messages?.map((m) => ({
+                messages: threadData.messages?.map((m: any) => ({
                   author_name: m.author_name,
                   content: m.content,
                 })) || [],

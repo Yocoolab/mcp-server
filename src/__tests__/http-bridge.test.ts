@@ -42,7 +42,11 @@ function validPayload(overrides: Record<string, unknown> = {}) {
   });
 }
 
-// FIXME(v1.0.1): tests went stale after http-bridge return shape changed; mock no longer matches real interface (server.on, server.close undefined). Re-enable after rewriting against current bridge API.
+// FIXME(v1.1.0): startHttpBridge() return shape changed — it no longer returns a raw http.Server.
+// Tests fail with "server.on is not a function" / "server.close is not a function". The bridge now
+// returns an object with helper functions (emitThreadUpdate, getCompanionMessages, postCompanionReply)
+// rather than the underlying server. To re-enable: refactor tests to use a fresh port + supertest-style
+// HTTP requests instead of binding directly to the returned server. Tracking: TODO-issue.
 describe.skip('HTTP Bridge', () => {
   let server: http.Server;
   let store: SelectionStore;
