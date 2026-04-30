@@ -4,6 +4,11 @@ All notable changes to `@yocoolab/mcp-server` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-04-30
+
+### Fixed
+- `npx -y @yocoolab/mcp-server` now resolves the bin correctly. Added an `mcp-server` bin alias matching the unscoped package name so npx finds it without requiring `--package=…` or `-- yocoolab-mcp`. The original `yocoolab-mcp` command name still works.
+
 ## [1.0.0] — 2026-04-23
 
 ### Added
@@ -17,4 +22,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Deployment tools: `get_deployment_preview`.
 - Pendo integration tools: `pendo_list_guides`, `pendo_page_analytics`, `pendo_feature_usage`, `pendo_track_event`.
 
+[1.0.1]: https://github.com/yocoolab/mcp-server/releases/tag/v1.0.1
 [1.0.0]: https://github.com/yocoolab/mcp-server/releases/tag/v1.0.0
