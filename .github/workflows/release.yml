@@ -17,16 +17,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.x
+          # Node 24 ships with npm 11+, which has built-in OIDC trusted publishing.
+          # Node 22 ships npm 10 and the in-place upgrade is broken on the runner image.
+          node-version: 24.x
           registry-url: 'https://registry.npmjs.org'
           cache: npm
 
-      # Trusted publishing OIDC requires npm 11+. Node 22 ships npm 10.x.
-      # corepack avoids npm's broken self-upgrade (MODULE_NOT_FOUND on promise-retry).
-      - run: |
-          corepack enable
-          corepack prepare npm@11.0.0 --activate
-          npm --version
+      - run: npm --version
 
       - run: npm ci
       - run: npm run build
