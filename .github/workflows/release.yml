@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           # Node 24 ships with npm 11+, which has built-in OIDC trusted publishing.
           # Node 22 ships npm 10 and the in-place upgrade is broken on the runner image.
