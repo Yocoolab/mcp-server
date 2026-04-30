@@ -12,13 +12,13 @@
     "feedback",
     "ai-tools"
   ],
-  "homepage": "https://github.com/yocoolab/mcp-server#readme",
+  "homepage": "https://github.com/Yocoolab/mcp-server#readme",
   "bugs": {
-    "url": "https://github.com/yocoolab/mcp-server/issues"
+    "url": "https://github.com/Yocoolab/mcp-server/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yocoolab/mcp-server.git"
+    "url": "git+https://github.com/Yocoolab/mcp-server.git"
   },
   "license": "Apache-2.0",
   "author": "Yocoolab",
