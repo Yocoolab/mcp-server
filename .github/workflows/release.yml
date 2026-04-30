@@ -36,6 +36,10 @@ jobs:
 
       - name: Publish to npm with provenance
         run: npm publish --provenance --access public
+        env:
+          # Trusted publishing uses OIDC — clear setup-node's placeholder
+          # auth token so npm doesn't try (and fail) to use it.
+          NODE_AUTH_TOKEN: ""
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
