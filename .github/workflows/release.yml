@@ -21,8 +21,8 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: npm
 
-      # Trusted publishing requires npm 11+ for automatic OIDC
-      - run: npm install -g npm@latest
+      # Node 22.13+ ships with npm 11+, which has built-in OIDC for trusted publishing.
+      - run: npm --version
 
       - run: npm ci
       - run: npm run build
