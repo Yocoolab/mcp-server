@@ -5,6 +5,7 @@
 // anything else → start MCP server. Branches are mutually exclusive.
 
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -117,7 +118,12 @@ function startServer(): void {
   const { emitThreadUpdate, getCompanionMessages, postCompanionReply } = bridge;
   
   // ─── Register this agent with the bridge ────────────────────────────
-  const agentId = `${YOCOOLAB_AGENT_TYPE}-${Date.now()}`;
+  // Deterministic agent ID — re-launching Claude Code on the same workspace
+  // updates the same registry entry instead of creating a new one. Without
+  // this, every restart pollutes the bridge with a fresh `${type}-${ts}` row
+  // and the extension's agent picker fills up with duplicates.
+  const agentIdSeed = `${YOCOOLAB_AGENT_TYPE}|${YOCOOLAB_BRIDGE_WORKSPACE}|${YOCOOLAB_AGENT_NAME}`;
+  const agentId = `${YOCOOLAB_AGENT_TYPE}-${createHash('sha256').update(agentIdSeed).digest('hex').slice(0, 12)}`;
   function registerAgent() {
     const payload = JSON.stringify({
       id: agentId,

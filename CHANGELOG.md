@@ -4,6 +4,11 @@ All notable changes to `@yocoolab/mcp-server` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] — 2026-04-30
+
+### Fixed
+- **Deterministic agent IDs.** Previously each MCP server start generated a fresh agent ID (`${type}-${Date.now()}`) and registered it with the bridge, so each Claude Code restart left a stale entry. The extension's agent picker would fill up with duplicate "Claude Code" rows. Agent ID is now derived from a SHA-256 of `agentType | workspace | agentName` (truncated to 12 hex chars), so re-launching on the same workspace updates the existing entry instead of creating a new one. Different workspaces still get distinct IDs.
+
 ## [2.1.0] — 2026-04-30
 
 ### Added
@@ -59,6 +64,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Deployment tools: `get_deployment_preview`.
 - Pendo integration tools: `pendo_list_guides`, `pendo_page_analytics`, `pendo_feature_usage`, `pendo_track_event`.
 
+[2.1.1]: https://github.com/Yocoolab/mcp-server/releases/tag/v2.1.1
 [2.1.0]: https://github.com/Yocoolab/mcp-server/releases/tag/v2.1.0
 [2.0.0]: https://github.com/Yocoolab/mcp-server/releases/tag/v2.0.0
 [1.0.1]: https://github.com/Yocoolab/mcp-server/releases/tag/v1.0.1
