@@ -4,10 +4,26 @@ export async function handleListThreads(
   api: YocoolabApiClient,
   args: { repo: string; branch?: string; claude_code_pending?: boolean }
 ) {
+  // Per-agent routing (paired with backend migration 041 and the
+  // extension's send-to-claude POST body): when a user picks a
+  // specific agent in the extension picker, the backend stamps
+  // target_agent_type on the thread. Each MCP server process
+  // announces its own type via YOCOOLAB_AGENT_TYPE (set by the
+  // setup wizard or the user's MCP config). When listing threads
+  // pending Claude Code, we filter by that so each agent only sees
+  // threads addressed to it (or untargeted threads, which fall back
+  // to all). We don't apply the filter for the broader list
+  // (claude_code_pending=false/undefined) so general thread queries
+  // still return everything.
+  const targetAgentType = args.claude_code_pending
+    ? (process.env.YOCOOLAB_AGENT_TYPE || undefined)
+    : undefined;
+
   const threads = await api.listThreads(args.repo, {
     status: 'open',
     branch: args.branch,
     claude_code_pending: args.claude_code_pending,
+    target_agent_type: targetAgentType,
   });
 
   if (threads.length === 0) {

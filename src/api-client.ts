@@ -134,11 +134,12 @@ export class YocoolabApiClient {
   /**
    * List threads for a repository, optionally filtered by status and branch.
    */
-  async listThreads(repo: string, options?: { status?: string; branch?: string; claude_code_pending?: boolean }): Promise<ThreadSummary[]> {
+  async listThreads(repo: string, options?: { status?: string; branch?: string; claude_code_pending?: boolean; target_agent_type?: string }): Promise<ThreadSummary[]> {
     const params = new URLSearchParams({ repo });
     if (options?.status) params.set('status', options.status);
     if (options?.branch) params.set('branch', options.branch);
     if (options?.claude_code_pending !== undefined) params.set('claude_code_pending', String(options.claude_code_pending));
+    if (options?.target_agent_type) params.set('target_agent_type', options.target_agent_type);
     return this.request<ThreadSummary[]>(`/threads?${params.toString()}`);
   }
 

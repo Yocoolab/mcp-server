@@ -4,6 +4,11 @@ All notable changes to `@yocoolab/mcp-server` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] — 2026-05-06
+
+### Added
+- **Per-agent thread routing.** When `list_open_threads` is called with `claude_code_pending=true`, the server now passes its own `YOCOOLAB_AGENT_TYPE` (e.g. `claude-code`, `cline`, `cursor`, `roo`, `windsurf`) to the backend's `target_agent_type` filter. Each agent's MCP server only sees threads explicitly addressed to it — or threads with no target (those fall back to all agents for backward compatibility). Pairs with backend migration 041 and the Chrome extension's `send-to-claude` POST body. Untargeted thread queries (`claude_code_pending=false` / not set) are unaffected and still return everything for the repo.
+
 ## [2.1.1] — 2026-04-30
 
 ### Fixed
@@ -64,6 +69,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Deployment tools: `get_deployment_preview`.
 - Pendo integration tools: `pendo_list_guides`, `pendo_page_analytics`, `pendo_feature_usage`, `pendo_track_event`.
 
+[2.2.0]: https://github.com/Yocoolab/mcp-server/releases/tag/v2.2.0
 [2.1.1]: https://github.com/Yocoolab/mcp-server/releases/tag/v2.1.1
 [2.1.0]: https://github.com/Yocoolab/mcp-server/releases/tag/v2.1.0
 [2.0.0]: https://github.com/Yocoolab/mcp-server/releases/tag/v2.0.0
