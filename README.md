@@ -57,7 +57,7 @@ The `@2` version pin keeps you on the v2 major line — you'll receive bug fixes
 
 - **Node.js 20 or newer.** We test on Node 20 and 22 in CI. We support whichever Node.js versions are currently in [Active LTS or Maintenance LTS](https://nodejs.org/en/about/previous-releases) status, and drop versions within 30 days of their EOL. Node 18 was dropped in v2.0.0 (EOL April 2025).
 - **A Yocoolab account and JWT token** — get yours from the Yocoolab Chrome extension settings, or via your account at [app.yocoolab.com](https://app.yocoolab.com).
-- **A GitHub personal access token** with `repo` scope, if you want to use the PR-creation tools.
+- **A GitHub personal access token** with `repo` scope, if you want to use the PR-creation tools (`create_pr_for_thread`). The token is auto-detected if you have the [GitHub CLI](https://cli.github.com/) installed and authenticated (`gh auth login`). No `GITHUB_TOKEN` env var needed in that case. Otherwise, create one at [github.com/settings/tokens/new?scopes=repo](https://github.com/settings/tokens/new?scopes=repo&description=Yocoolab%20MCP).
 
 ## Configuration
 
@@ -65,7 +65,7 @@ The `@2` version pin keeps you on the v2 major line — you'll receive bug fixes
 |---|---|---|---|
 | `YOCOOLAB_TOKEN` | no | — | Your Yocoolab JWT (from the Chrome extension). When unset, thread feedback tools are disabled but bridge / companion / activity tools still work. |
 | `YOCOOLAB_API_URL` | no | `https://app.yocoolab.com` | Yocoolab API base URL |
-| `GITHUB_TOKEN` | only for PR tools | — | GitHub PAT with `repo` scope |
+| `GITHUB_TOKEN` | only for PR tools | — | GitHub PAT with `repo` scope. **Auto-detected** — if `gh` CLI is installed and authenticated (`gh auth token`), no env var is needed. Placeholder values like `<your GitHub PAT>` are detected and safely ignored. |
 | `YOCOOLAB_BRIDGE_PORT` | no | `9800` | Local port for the HTTP bridge to the Chrome extension |
 | `YOCOOLAB_BRIDGE_WORKSPACE` | no | `process.cwd()` | Absolute path to your project workspace, used to resolve file references in selections |
 | `YOCOOLAB_AGENT_NAME` | no | `Claude Code` | Display name shown in the Chrome extension's agent picker |
@@ -106,6 +106,11 @@ For full tool descriptions and parameters, your MCP client will list them after 
 **`Port 9800 is already in use`** — another instance of the MCP server is running, or another app has the port. Set `YOCOOLAB_BRIDGE_PORT` to a different value (e.g. `9801`) in your `.mcp.json`.
 
 **Verbose diagnostic logs** — set `DEBUG=yocoolab:*` in your env block. All diagnostic output goes to stderr (so it doesn't interfere with the MCP stdio protocol on stdout).
+
+**PR creation says "GitHub token not configured"** — the `create_pr_for_thread` tool needs a GitHub token. Two ways to fix:
+1. **Auto-detect (easiest):** install the [GitHub CLI](https://cli.github.com/) and run `gh auth login`. The server picks up the token automatically.
+2. **Manual:** create a [personal access token](https://github.com/settings/tokens/new?scopes=repo&description=Yocoolab%20MCP) with `repo` scope and add `GITHUB_TOKEN: "ghp_..."` to your MCP config's `env` block.
+If your config has a placeholder value like `<your GitHub PAT>`, the server detects it and shows a helpful message instead of crashing with a 401.
 
 ## Support
 

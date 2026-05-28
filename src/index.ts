@@ -78,8 +78,52 @@ function startServer(): void {
   // Configuration from environment
   const YOCOOLAB_API_URL = process.env.YOCOOLAB_API_URL || 'https://app.yocoolab.com';
   const YOCOOLAB_TOKEN = process.env.YOCOOLAB_TOKEN;
-  const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
   const PENDO_INTEGRATION_KEY = process.env.PENDO_INTEGRATION_KEY;
+
+  // ─── GitHub token resolution ────────────────────────────────────────
+  const PLACEHOLDER_PATTERNS = [
+    /^<.*>$/,                      // <your-token>, <GitHub PAT>, etc.
+    /^your.*token/i,               // "your GitHub PAT", "your token here"
+    /^ghp_?placeholder/i,          // ghp_placeholder, ghplaceholder
+    /^xxxx/i,                      // xxxx..., XXXXX
+    /^change.*me/i,                // "change me", "CHANGE_ME"
+  ];
+
+  function isPlaceholderToken(token: string): boolean {
+    const trimmed = token.trim();
+    if (!trimmed) return true;
+    return PLACEHOLDER_PATTERNS.some(p => p.test(trimmed));
+  }
+
+  let rawToken = process.env.GITHUB_TOKEN;
+
+  if (rawToken && isPlaceholderToken(rawToken)) {
+    process.stderr.write(
+      '[yocoolab] Warning: GITHUB_TOKEN appears to be a placeholder — PR creation disabled.\n' +
+      '[yocoolab] Set a real GitHub PAT with "repo" scope in your MCP config to enable PR creation.\n'
+    );
+    rawToken = undefined;
+  }
+
+  // Try gh CLI as automatic fallback
+  if (!rawToken) {
+    try {
+      const { execSync } = require('child_process');
+      const ghToken = execSync('gh auth token', {
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      if (ghToken && !isPlaceholderToken(ghToken)) {
+        rawToken = ghToken;
+        process.stderr.write('[yocoolab] Using GitHub token from gh CLI.\n');
+      }
+    } catch {
+      // gh CLI not installed or not authenticated — that's fine
+    }
+  }
+
+  const GITHUB_TOKEN = rawToken;
   const YOCOOLAB_BRIDGE_PORT = parseInt(process.env.YOCOOLAB_BRIDGE_PORT || process.env.UX_BRIDGE_PORT || '9800', 10);
   const YOCOOLAB_BRIDGE_WORKSPACE = process.env.YOCOOLAB_BRIDGE_WORKSPACE || process.env.UX_BRIDGE_WORKSPACE || process.cwd();
   const YOCOOLAB_AGENT_NAME = process.env.YOCOOLAB_AGENT_NAME || 'Claude Code';
@@ -315,7 +359,7 @@ function startServer(): void {
             content: [
               {
                 type: 'text' as const,
-                text: 'Error: GITHUB_TOKEN environment variable is required to create pull requests.',
+                text: 'GitHub token not configured. To enable PR creation:\n\n1. Create a token at https://github.com/settings/tokens/new?scopes=repo with "repo" scope\n2. Add it to your MCP config:\n\n   "env": {\n     "GITHUB_TOKEN": "ghp_..."\n   }\n\nTip: If you have the GitHub CLI installed and authenticated (gh auth login), the token is auto-detected — no env var needed.',
               },
             ],
             isError: true,
