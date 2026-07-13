@@ -371,10 +371,10 @@ function startServer(): void {
   
     server.tool(
       'mark_thread_addressed',
-      'Mark a feedback thread as resolved. Optionally add a message explaining how it was addressed.',
+      'Mark a feedback thread as addressed and ready for review. This moves the thread to the "In Review" column and clears the pending flag — it does NOT resolve or close the thread. Only a human closes a thread (after verifying the change). Optionally add a message explaining what you did.',
       {
-        thread_id: z.string().describe('The UUID of the thread to resolve'),
-        message: z.string().optional().describe('Optional message explaining how the feedback was addressed'),
+        thread_id: z.string().describe('The UUID of the thread you have addressed'),
+        message: z.string().optional().describe('Optional message explaining how the feedback was addressed (e.g. a summary of the change and the preview link)'),
       },
       withCompanion(async (args) => {
         return handleMarkAddressed(api, args, emitThreadUpdate);
