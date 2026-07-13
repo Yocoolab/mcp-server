@@ -27,29 +27,35 @@ export async function handleMarkAddressed(
     await api.addMessage(args.thread_id, finalMessage, thread.repo);
   }
 
-  // Resolve the thread and clear claude_code_pending
+  // Move the thread to the "In Review" column and clear the pending flag — but do
+  // NOT resolve it. Closing a thread is a human decision; the agent's job ends at
+  // "ready for review". The person verifies the change and marks it done. This is
+  // what keeps the user in control of their own board.
   await api.updateThread(args.thread_id, thread.repo, {
-    status: 'resolved',
+    kanban_stage: 'in_review',
     claude_code_pending: false,
   });
 
-  // Notify thread participants
+  // Notify thread participants that a change is ready for their review.
   try {
     const notifyResult = await api.notifyParticipants(
       args.thread_id,
       thread.repo,
-      'resolved',
-      finalMessage || 'Thread resolved by Claude Code',
+      'pr_created',
+      finalMessage || 'A change is ready for your review.',
     );
     console.error(`[mark-addressed] Notified ${notifyResult.notified} participant(s)`);
   } catch (err) {
     console.error('[mark-addressed] Failed to notify participants:', err);
   }
 
-  // Push SSE event to extension (include preview URL)
+  // Push SSE event so the extension flips to the "In review" state (thread stays
+  // open, action buttons stay live). Older extensions that don't know this event
+  // just refetch and read status=open + kanban_stage=in_review.
   if (emitThreadUpdate) {
-    emitThreadUpdate(args.thread_id, 'thread_resolved', {
-      status: 'resolved',
+    emitThreadUpdate(args.thread_id, 'thread_in_review', {
+      status: 'open',
+      kanban_stage: 'in_review',
       message: finalMessage || null,
       preview_url: previewUrl,
     });
@@ -60,7 +66,7 @@ export async function handleMarkAddressed(
       {
         type: 'text' as const,
         text: [
-          `Thread ${args.thread_id} has been resolved.`,
+          `Thread ${args.thread_id} moved to In Review — it is ready for a human to verify and close. It was NOT auto-resolved (only a person closes a thread).`,
           finalMessage ? `Message added: "${finalMessage}"` : '',
           previewUrl ? `Preview: ${previewUrl}` : '',
         ].filter(Boolean).join(' '),
