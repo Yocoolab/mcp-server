@@ -38,6 +38,10 @@ export interface ThreadSummary {
   creator_email: string;
   message_count: number;
   last_activity: string | null;
+  // Categorization the backend already returns (thread_summary view): the kind
+  // of change the feedback concerns, and the board column the card sits in.
+  service_type?: 'frontend' | 'api' | 'backend' | 'other' | null;
+  kanban_stage?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | null;
 }
 
 export interface MessageDetail {
@@ -132,10 +136,13 @@ export class YocoolabApiClient {
   }
 
   /**
-   * List threads for a repository, optionally filtered by status and branch.
+   * List threads, optionally filtered by status and branch. When `repo` is
+   * omitted the backend returns the caller's full permission-scoped thread
+   * pool across ALL connected repos — each thread carries its own `repo`, so
+   * agents don't need a hardcoded repo list that goes stale as repos are added.
    */
-  async listThreads(repo: string, options?: { status?: string; branch?: string; claude_code_pending?: boolean; target_agent_type?: string }): Promise<ThreadSummary[]> {
-    const params = new URLSearchParams({ repo });
+  async listThreads(repo: string | undefined, options?: { status?: string; branch?: string; claude_code_pending?: boolean; target_agent_type?: string }): Promise<ThreadSummary[]> {
+    const params = new URLSearchParams(repo ? { repo } : {});
     if (options?.status) params.set('status', options.status);
     if (options?.branch) params.set('branch', options.branch);
     if (options?.claude_code_pending !== undefined) params.set('claude_code_pending', String(options.claude_code_pending));

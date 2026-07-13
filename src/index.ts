@@ -318,9 +318,9 @@ function startServer(): void {
   if (api) {
     server.tool(
       'list_open_threads',
-      'List unresolved feedback threads for a repository. Returns thread summaries with context about what UI element each comment is attached to. Use claude_code_pending=true to only show threads that users have sent to Claude Code.',
+      'List open feedback threads. Omit repo to get ALL threads across every repo you have access to — each result is labeled with its repo, change type (frontend/api/backend), board stage, and UI element context. Use claude_code_pending=true to only show threads that users have sent to Claude Code.',
       {
-        repo: z.string().describe('Repository identifier (e.g., "org/repo-name")'),
+        repo: z.string().optional().describe('Optional repository filter (e.g., "org/repo-name"). Omit to list threads across ALL your connected repos.'),
         branch: z.string().optional().describe('Optional branch filter (e.g., "main", "feature/xyz")'),
         claude_code_pending: z.boolean().optional().describe('Filter for threads pending Claude Code review (true = only pending threads)'),
       },

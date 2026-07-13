@@ -2,7 +2,7 @@ import { YocoolabApiClient } from '../api-client.js';
 
 export async function handleListThreads(
   api: YocoolabApiClient,
-  args: { repo: string; branch?: string; claude_code_pending?: boolean }
+  args: { repo?: string; branch?: string; claude_code_pending?: boolean }
 ) {
   // Per-agent routing (paired with backend migration 041 and the
   // extension's send-to-claude POST body): when a user picks a
@@ -19,6 +19,10 @@ export async function handleListThreads(
     ? (process.env.YOCOOLAB_AGENT_TYPE || undefined)
     : undefined;
 
+  // repo omitted → the backend returns the caller's permission-scoped pool
+  // across ALL connected repos. Every thread below is labeled with its repo,
+  // change type (service_type) and board stage, so the agent has full context
+  // without any hardcoded repo list that goes stale as repos are connected.
   const threads = await api.listThreads(args.repo, {
     status: 'open',
     branch: args.branch,
@@ -35,7 +39,7 @@ export async function handleListThreads(
       content: [
         {
           type: 'text' as const,
-          text: `No open feedback threads found for ${args.repo}${filters ? ` ${filters}` : ''}.`,
+          text: `No open feedback threads found ${args.repo ? `for ${args.repo}` : 'across your connected repos'}${filters ? ` ${filters}` : ''}.`,
         },
       ],
     };
@@ -44,9 +48,17 @@ export async function handleListThreads(
   const summary = threads.map((t, i) => {
     const parts = [
       `${i + 1}. **Thread ${t.id}**`,
+      `   Repo: ${t.repo}${t.branch ? ` (branch: ${t.branch})` : ''}`,
       `   Priority: ${t.priority} | Messages: ${t.message_count} | By: ${t.creator_name}`,
       `   Created: ${t.created_at}`,
     ];
+    // Change type + board stage — enough context to route and act:
+    // frontend/api/backend/other, and where the card sits on the board.
+    const meta = [
+      t.service_type ? `Type: ${t.service_type}` : '',
+      t.kanban_stage ? `Stage: ${t.kanban_stage}` : '',
+    ].filter(Boolean).join(' | ');
+    if (meta) parts.push(`   ${meta}`);
     if (t.claude_code_pending) parts.push(`   ⚡ Pending for Claude Code`);
     if (t.selector) parts.push(`   Element: \`${t.selector}\``);
     if (t.element_tag) parts.push(`   Tag: <${t.element_tag}>${t.element_text ? ` "${t.element_text}"` : ''}`);
@@ -59,11 +71,12 @@ export async function handleListThreads(
     return parts.join('\n');
   });
 
+  const scope = args.repo ? `for **${args.repo}**` : 'across all your connected repos';
   return {
     content: [
       {
         type: 'text' as const,
-        text: `Found ${threads.length} open thread(s) for **${args.repo}**:\n\n${summary.join('\n\n')}`,
+        text: `Found ${threads.length} open thread(s) ${scope}:\n\n${summary.join('\n\n')}`,
       },
     ],
   };

@@ -84,4 +84,36 @@ describe('handleListThreads', () => {
       branch: 'feature/x',
     });
   });
+
+  it('works WITHOUT a repo — lists across all connected repos', async () => {
+    const api = makeApi([
+      { id: 't1', repo: 'acme/site-a', branch: 'main', priority: 'normal' as const, message_count: 1, creator_name: 'A', created_at: '2026-01-01', tags: [], created_by: 'u1', status: 'open' as const } as Partial<ThreadSummary>,
+      { id: 't2', repo: 'acme/site-b', branch: 'main', priority: 'high' as const, message_count: 2, creator_name: 'B', created_at: '2026-01-02', tags: [], created_by: 'u2', status: 'open' as const } as Partial<ThreadSummary>,
+    ]);
+    const result = await handleListThreads(api, {});
+
+    expect(api.listThreads).toHaveBeenCalledWith(undefined, { status: 'open', branch: undefined });
+    const text = result.content[0].text;
+    expect(text).toContain('across all your connected repos');
+    expect(text).toContain('Repo: acme/site-a');
+    expect(text).toContain('Repo: acme/site-b');
+  });
+
+  it('labels each thread with change type and board stage when present', async () => {
+    const api = makeApi([
+      { id: 't3', repo: 'acme/site-a', branch: 'main', priority: 'normal' as const, message_count: 1, creator_name: 'A', created_at: '2026-01-01', tags: [], created_by: 'u1', status: 'open' as const, service_type: 'frontend', kanban_stage: 'in_review' } as Partial<ThreadSummary>,
+    ]);
+    const result = await handleListThreads(api, {});
+    const text = result.content[0].text;
+
+    expect(text).toContain('Type: frontend');
+    expect(text).toContain('Stage: in_review');
+  });
+
+  it('empty message adapts when no repo given', async () => {
+    const api = makeApi([]);
+    const result = await handleListThreads(api, {});
+
+    expect(result.content[0].text).toContain('across your connected repos');
+  });
 });
