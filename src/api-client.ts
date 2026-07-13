@@ -106,6 +106,17 @@ export interface DeploymentInfo {
   created_at: string;
 }
 
+/**
+ * The display name this agent signs its thread messages with. Reads
+ * YOCOOLAB_AGENT_NAME at call time (same env the bridge registration uses) so
+ * each agent profile — "Hermes Agent", "Claude Code", "Cursor", … — shows up
+ * under its own name instead of everything being labeled "Claude Code".
+ */
+export function agentDisplayName(): string {
+  const name = (process.env.YOCOOLAB_AGENT_NAME || '').trim();
+  return name || 'Claude Code';
+}
+
 export class YocoolabApiClient {
   private baseUrl: string;
   private token: string;
@@ -172,12 +183,15 @@ export class YocoolabApiClient {
   }
 
   /**
-   * Add a message to a thread.
+   * Add a message to a thread. Messages are signed with the agent's configured
+   * display name (YOCOOLAB_AGENT_NAME) so different agents — Hermes profiles,
+   * Claude Code, Cursor, etc. — are distinguishable in the thread. Falls back
+   * to "Claude Code" for configs that never set a name.
    */
   async addMessage(threadId: string, content: string, repo: string): Promise<MessageDetail> {
     return this.request<MessageDetail>(`/threads/${threadId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ content, repo, author_display_name: 'Claude Code' }),
+      body: JSON.stringify({ content, repo, author_display_name: agentDisplayName() }),
     });
   }
 
@@ -247,7 +261,7 @@ export class YocoolabApiClient {
   ): Promise<{ notified: number; message: string }> {
     return this.request<{ notified: number; message: string }>(`/threads/${threadId}/notify`, {
       method: 'POST',
-      body: JSON.stringify({ repo, type, content, pr_url: prUrl, author_display_name: 'Claude Code', include_self: true }),
+      body: JSON.stringify({ repo, type, content, pr_url: prUrl, author_display_name: agentDisplayName(), include_self: true }),
     });
   }
 
