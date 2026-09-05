@@ -1,0 +1,40 @@
+# Smithery listing for @yocoolab/mcp-server.
+#
+# Runs the published npm package over stdio rather than building from source,
+# so a Smithery install always matches what npm serves. Pinned to the v2 major
+# line for the same reason the README recommends it: bug fixes and features
+# arrive automatically, a future v3 cannot break an existing setup.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      yocoolabToken:
+        type: string
+        title: Yocoolab token
+        description: Your Yocoolab JWT, from the Chrome extension settings or app.yocoolab.com. Without it, thread feedback tools are disabled but bridge, companion and activity tools still work.
+      yocoolabApiUrl:
+        type: string
+        title: Yocoolab API URL
+        description: Yocoolab API base URL.
+        default: https://app.yocoolab.com
+      githubToken:
+        type: string
+        title: GitHub token
+        description: GitHub PAT with repo scope. Needed only for the PR-creation tools, and auto-detected from the gh CLI when authenticated.
+      bridgeWorkspace:
+        type: string
+        title: Workspace path
+        description: Absolute path to your project workspace, used to resolve file references in selections. Defaults to the current working directory.
+    required: []
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', '@yocoolab/mcp-server@2'],
+      env: {
+        ...(config.yocoolabToken ? { YOCOOLAB_TOKEN: config.yocoolabToken } : {}),
+        ...(config.yocoolabApiUrl ? { YOCOOLAB_API_URL: config.yocoolabApiUrl } : {}),
+        ...(config.githubToken ? { GITHUB_TOKEN: config.githubToken } : {}),
+        ...(config.bridgeWorkspace ? { YOCOOLAB_BRIDGE_WORKSPACE: config.bridgeWorkspace } : {})
+      }
+    })
