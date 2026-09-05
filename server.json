@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.yocoolab/yocoolab",
-  "description": "Pin visual feedback on any live web page and hand it to your AI coding agent with the element, selector, screenshot and full thread attached — then get a pull request back. Works with Claude Code, Cursor, Cline, Roo Code and Windsurf.",
+  "description": "Pin visual feedback on any live web page and hand it to your AI coding agent with the element, selector, screenshot and full thread attached \u2014 then get a pull request back. Works with Claude Code, Cursor, Cline, Roo Code and Windsurf.",
   "repository": {
     "url": "https://github.com/Yocoolab/mcp-server",
     "source": "github"
   },
-  "version": "2.4.1",
+  "version": "2.4.2",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@yocoolab/mcp-server",
-      "version": "2.4.1",
+      "version": "2.4.2",
       "transport": {
         "type": "stdio"
       },
