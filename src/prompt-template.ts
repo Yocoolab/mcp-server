@@ -1,4 +1,5 @@
 import type { ClaudePromptContext } from './types.js';
+import { PROJECT_PR_LINKS, isOwnerNameKey } from './feature-flags.js';
 
 export function generateClaudePrompt(ctx: ClaudePromptContext): string {
   const { elementPayload, candidates, workspaceRoot, threadContext } = ctx;
@@ -52,7 +53,46 @@ ${candidateList || '(no candidates found — search workspace manually)'}`;
 - Keep existing patterns and style conventions.
 - If multiple candidates exist, propose edits for the top candidate only, and explain why.`;
 
-  if (threadContext) {
+  if (threadContext && PROJECT_PR_LINKS && !isOwnerNameKey(threadContext.repo)) {
+    // Link-only project ("project:<uuid>" key): Yocoolab has no GitHub App
+    // access, so the agent opens the PR itself and hands the links back via
+    // mark_thread_addressed instead of create_pr_for_thread.
+    const linkLines = (threadContext.repoLinks || [])
+      .filter((l) => l && l.url)
+      .map((l) => `  - ${l.role || 'repo'}: ${l.url}`)
+      .join('\n');
+    prompt += `
+
+## Workflow
+
+Complete all of the following steps in order:
+
+### Step 1: Make the code change
+- Read the source file(s) identified above.
+- Apply the minimal change that addresses the feedback.
+- Verify the change is correct.
+
+### Step 2: Commit, push, and open the Pull Request yourself
+- This thread belongs to a link-only project ("${threadContext.repo}"). Yocoolab has no write access to the repository, so do NOT use \`create_pr_for_thread\` — it only works for GitHub-App-connected "owner/name" repos.
+- The thread's repo_links tell you which repository/branch the project points at${linkLines ? ':\n' + linkLines : ' (see "Repo links" in get_thread_context for thread "' + threadContext.threadId + '")'}. Work in your own checkout of that repository.
+- Commit the change on a new branch in your checkout (e.g. "fix/<short-description>") and push it.
+- Open the PR with the GitHub CLI (\`gh pr create\`) or your Git host's UI/API. Note the PR URL.
+- If your host deploys a preview for the branch (Vercel, Netlify, GitHub Pages, …), note that preview URL too.
+
+### Step 3: Record the links on the thread
+- Use the \`mark_thread_addressed\` tool with:
+  - thread_id: "${threadContext.threadId}"
+  - pr_url: the PR you opened
+  - pr_branch: the branch you pushed
+  - preview_url: the deployed preview of the change, when you have one
+  - message: a short summary of what changed and why
+- This moves the thread to "In Review" and records the PR on it; the preview link is posted in the review message. Do NOT resolve the thread — a person closes it after verifying.
+
+### Step 4: Summarize
+- Provide a brief summary of what was changed and why.
+
+Now begin with Step 1.`;
+  } else if (threadContext) {
     // Full workflow instructions when thread context is available
     prompt += `
 

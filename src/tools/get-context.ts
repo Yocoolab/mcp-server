@@ -1,4 +1,5 @@
 import { YocoolabApiClient } from '../api-client.js';
+import { PROJECT_PR_LINKS } from '../feature-flags.js';
 
 export async function handleGetContext(
   api: YocoolabApiClient,
@@ -13,6 +14,17 @@ export async function handleGetContext(
     `**Repo:** ${thread.repo} | **Branch:** ${thread.branch}`,
     `**Created by:** ${thread.creator_name} at ${thread.created_at}`,
   ];
+
+  // Link-only projects: tell a remote agent which repository the project
+  // points at, so it can open its PR there and hand the link back via
+  // mark_thread_addressed(pr_url).
+  if (PROJECT_PR_LINKS && Array.isArray(thread.repo_links) && thread.repo_links.length > 0) {
+    parts.push('**Repo links:**');
+    for (const link of thread.repo_links) {
+      if (!link || !link.url) continue;
+      parts.push(`- ${link.role || 'repo'}: ${link.url}`);
+    }
+  }
 
   // UI element context
   if (thread.selector) parts.push(`**CSS Selector:** \`${thread.selector}\``);

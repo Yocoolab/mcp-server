@@ -4,6 +4,13 @@ All notable changes to `@yocoolab/mcp-server` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2.5.0 — Unreleased
+
+- `mark_thread_addressed` accepts optional `pr_url`, `pr_branch` and `preview_url`, so an agent on a link-only project (`project:<uuid>` workspace) can record the PR it opened itself. The PR number is derived from GitHub `/pull/N` or GitLab `/merge_requests/N` URLs; the preview link is posted in the review message. The stage move happens first and is never undone by a rejected link.
+- `get_thread_context` and `list_open_threads` print the project's repo links (`role: url`).
+- The agent prompt no longer steers link-only projects into `create_pr_for_thread`; that tool now points to the new path instead of a dead end.
+- Kill switch: `YOCOOLAB_PROJECT_PR_LINKS=0` restores the previous behaviour exactly.
+
 ## [2.2.0] — 2026-05-06
 
 ### Added

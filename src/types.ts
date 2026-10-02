@@ -91,5 +91,7 @@ export interface ClaudePromptContext {
     repo: string;
     branch: string;
     messages: Array<{ author_name: string; content: string }>;
+    /** Link-only projects: repositories the project points at ([{role, url}]). */
+    repoLinks?: Array<{ role: string; url: string }>;
   };
 }

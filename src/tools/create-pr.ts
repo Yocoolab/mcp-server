@@ -1,6 +1,7 @@
 import { YocoolabApiClient } from '../api-client.js';
 import { GitHubClient, FileChange } from '../github-client.js';
 import type { ThreadUpdateEmitter } from '../http-bridge.js';
+import { PROJECT_PR_LINKS } from '../feature-flags.js';
 
 const FIXES_END_MARKER = '<!-- YOCOOLAB_FIXES_END -->';
 
@@ -72,6 +73,27 @@ export async function handleCreatePr(
   const [owner, repo] = thread.repo.split('/');
 
   if (!owner || !repo) {
+    if (PROJECT_PR_LINKS) {
+      const links = Array.isArray(thread.repo_links) && thread.repo_links.length > 0
+        ? thread.repo_links.filter((l) => l && l.url).map((l) => `${l.role || 'repo'}: ${l.url}`).join(', ')
+        : '';
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: [
+              `create_pr_for_thread cannot push for thread repo "${thread.repo}": it is a link-only project (not a GitHub-App-connected "owner/repo"), so Yocoolab has no write access to the repository.`,
+              ``,
+              `Open the PR yourself, then record it on the thread:`,
+              `1. In your own checkout of the project's repository${links ? ` (${links})` : ' (see repo_links in get_thread_context)'}, commit the change on a new branch and push it.`,
+              `2. Open the PR with the GitHub CLI (\`gh pr create\`) or your Git host.`,
+              `3. Call mark_thread_addressed with thread_id "${args.thread_id}", pr_url (the PR you opened), pr_branch, and preview_url when you have a deployed preview.`,
+            ].join('\n'),
+          },
+        ],
+        isError: true,
+      };
+    }
     return {
       content: [
         {

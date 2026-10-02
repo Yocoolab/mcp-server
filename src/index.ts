@@ -17,6 +17,7 @@ import { handleListThreads } from './tools/list-threads.js';
 import { handleGetContext } from './tools/get-context.js';
 import { handleCreatePr } from './tools/create-pr.js';
 import { handleMarkAddressed } from './tools/mark-addressed.js';
+import { PROJECT_PR_LINKS } from './feature-flags.js';
 import { handleGetDeploymentPreview } from './tools/get-deployment-preview.js';
 import { handleAddThreadMessage } from './tools/add-thread-message.js';
 import { registerGetLatestSelection } from './tools/get-latest-selection.js';
@@ -371,10 +372,17 @@ function startServer(): void {
   
     server.tool(
       'mark_thread_addressed',
-      'Mark a feedback thread as addressed and ready for review. This moves the thread to the "In Review" column and clears the pending flag — it does NOT resolve or close the thread. Only a human closes a thread (after verifying the change). Optionally add a message explaining what you did.',
+      PROJECT_PR_LINKS
+        ? 'Mark a feedback thread as addressed and ready for review. This moves the thread to the "In Review" column and clears the pending flag — it does NOT resolve or close the thread. Only a human closes a thread (after verifying the change). Optionally add a message explaining what you did. On a link-only project (thread repo key "project:<uuid>", no GitHub App access) open the PR with your own git/gh in your checkout and pass the links here: pr_url (+ pr_branch, preview_url) are recorded on the thread and the preview is posted in the review message.'
+        : 'Mark a feedback thread as addressed and ready for review. This moves the thread to the "In Review" column and clears the pending flag — it does NOT resolve or close the thread. Only a human closes a thread (after verifying the change). Optionally add a message explaining what you did.',
       {
         thread_id: z.string().describe('The UUID of the thread you have addressed'),
         message: z.string().optional().describe('Optional message explaining how the feedback was addressed (e.g. a summary of the change and the preview link)'),
+        ...(PROJECT_PR_LINKS ? {
+          pr_url: z.string().url().optional().describe('The PR you opened for this change (GitHub /pull/N or GitLab /merge_requests/N URL). Recorded on the thread; the PR number is derived from it.'),
+          pr_branch: z.string().optional().describe('The branch the PR was opened from'),
+          preview_url: z.string().url().optional().describe('Deployed preview of the change (e.g. a Vercel/Netlify preview URL). Posted in the review message so reviewers can open it.'),
+        } : {}),
       },
       withCompanion(async (args) => {
         return handleMarkAddressed(api, args, emitThreadUpdate);

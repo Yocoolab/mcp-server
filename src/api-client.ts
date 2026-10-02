@@ -42,6 +42,15 @@ export interface ThreadSummary {
   // of change the feedback concerns, and the board column the card sits in.
   service_type?: 'frontend' | 'api' | 'backend' | 'other' | null;
   kanban_stage?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | null;
+  // Link-only projects (workspace key "project:<uuid>"): the repository links
+  // the project points at ([{role, url}]), so a remote agent knows where to
+  // open its PR. Returned by GET /threads and GET /threads/:id.
+  repo_links?: RepoLink[];
+}
+
+export interface RepoLink {
+  role: string;
+  url: string;
 }
 
 export interface MessageDetail {

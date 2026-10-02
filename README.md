@@ -69,6 +69,7 @@ The `@2` version pin keeps you on the v2 major line — you'll receive bug fixes
 | `YOCOOLAB_BRIDGE_PORT` | no | `9800` | Local port for the HTTP bridge to the Chrome extension |
 | `YOCOOLAB_BRIDGE_WORKSPACE` | no | `process.cwd()` | Absolute path to your project workspace, used to resolve file references in selections |
 | `YOCOOLAB_AGENT_NAME` | no | `Claude Code` | Display name shown in the Chrome extension's agent picker |
+| `YOCOOLAB_PROJECT_PR_LINKS` | no | `1` | Set to `0` to restore the pre-2.5 behaviour: `mark_thread_addressed` without PR/preview link fields, GitHub-only PR guidance in the prompt |
 | `YOCOOLAB_AGENT_TYPE` | no | `claude-code` | Agent type identifier (`claude-code`, `roo`, `cline`, `cursor`, `windsurf`, or `custom`) |
 
 ## CLI
@@ -87,6 +88,7 @@ The `mcp-server` command is a synonym for `yocoolab-mcp`. Either works.
 The server exposes tools across several categories:
 
 - **Threads** — `list_open_threads`, `get_thread_context`, `add_thread_message`, `mark_thread_addressed`, `create_pr_for_thread`
+  - On a link-only project (no GitHub App connection) open the PR with your own git/`gh`, then call `mark_thread_addressed` with `pr_url` (and `pr_branch`, `preview_url` when you have them). The PR fields land on the thread and the preview link goes into the review message; `get_thread_context` prints the project's repo links so you know which repository it points at. `create_pr_for_thread` remains for GitHub-connected `owner/name` workspaces.
 - **Selection / Bridge** — `get_latest_selection`, `get_selection_history`, `get_element_context`, `find_source_for_selection`, `ai_analyze_page`
 - **Activity** — `get_recent_events`, `get_activity_summary`, `get_files_touched`, `get_companion_messages`, `reply_to_companion`
 - **AI** — `get_ai_conversations`

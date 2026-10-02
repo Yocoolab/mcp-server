@@ -5,6 +5,7 @@ import type { YocoolabApiClient } from '../api-client.js';
 import type { ElementSelectedPayload } from '../types.js';
 import { mapElementToSource } from '../mapper.js';
 import { generateClaudePrompt } from '../prompt-template.js';
+import { PROJECT_PR_LINKS } from '../feature-flags.js';
 
 /**
  * Converts a thread's stored element_context into an ElementSelectedPayload.
@@ -207,6 +208,11 @@ export function registerGetElementContext(
                   author_name: m.author_name,
                   content: m.content,
                 })) || [],
+                // Link-only projects: pass the repositories the project points
+                // at so the prompt can tell the agent where to open its PR.
+                ...(PROJECT_PR_LINKS && Array.isArray(threadData.repo_links)
+                  ? { repoLinks: threadData.repo_links }
+                  : {}),
               }
             : undefined,
         });

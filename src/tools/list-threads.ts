@@ -1,4 +1,5 @@
 import { YocoolabApiClient } from '../api-client.js';
+import { PROJECT_PR_LINKS } from '../feature-flags.js';
 
 export async function handleListThreads(
   api: YocoolabApiClient,
@@ -65,6 +66,14 @@ export async function handleListThreads(
     if (t.page_url) parts.push(`   Page: ${t.page_url}`);
     if (t.jira_issue_key) parts.push(`   Jira: ${t.jira_issue_key}`);
     if (t.pr_url) parts.push(`   PR: ${t.pr_url}`);
+    // Link-only projects: which repository the project points at.
+    if (PROJECT_PR_LINKS && Array.isArray(t.repo_links) && t.repo_links.length > 0) {
+      const links = t.repo_links
+        .filter((l) => l && l.url)
+        .map((l) => `${l.role || 'repo'}: ${l.url}`)
+        .join(', ');
+      if (links) parts.push(`   Repo links: ${links}`);
+    }
     if (t.parent_thread_id) {
       parts.push(`   Iteration: ${t.iteration_type} #${t.iteration_number} of thread ${t.parent_thread_id.slice(0, 8)}`);
     }
