@@ -9,6 +9,6 @@ if [ -z "$RESPONSE" ]; then
   exit 0
 fi
 
-COUNT=$(echo "$RESPONSE" | jq -r '.selections // 0' 2>/dev/null)
+COUNT=$(echo "$RESPONSE" | jq -r '.bridge.selections // .selections // 0' 2>/dev/null)
 echo "[Yocoolab Bridge] CONNECTED - Bridge is running. ${COUNT} selections in buffer."
 exit 0

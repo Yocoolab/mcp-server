@@ -8,7 +8,7 @@
 [![Types](https://img.shields.io/npm/types/@yocoolab/mcp-server.svg?style=flat-square)](./package.json)
 [![OpenSSF Best Practices](https://img.shields.io/badge/OpenSSF-best%20practices-blue?style=flat-square)](https://www.bestpractices.dev/)
 
-MCP (Model Context Protocol) server that exposes [Yocoolab](https://yocoolab.com) feedback threads, design selections, and activity events as tools for Claude Code and other MCP-compatible clients.
+MCP (Model Context Protocol) server that exposes [Yocoolab](https://yocoolab.com) feedback threads and design selections as tools for Claude Code and other MCP-compatible clients.
 
 With this installed, your AI coding assistant can:
 
@@ -17,14 +17,14 @@ With this installed, your AI coding assistant can:
 - Reply to designers and mark threads as addressed
 - Open PRs that close out feedback threads
 - Inspect element context and selection history from the Yocoolab Chrome extension
-- Read activity summaries, AI conversations, and Pendo product analytics
+- Read companion chat messages, AI conversations, and Pendo product analytics
 
 ## Install
 
 One command:
 
 ```bash
-npx -y @yocoolab/mcp-server@2 setup
+npx -y @yocoolab/mcp-server@3 setup
 ```
 
 The `setup` wizard auto-detects your installed AI agents (Claude Code, Cursor, Cline, Roo Code, Windsurf) and writes the correct MCP config for each. Restart your agent and the `yocoolab` server appears with all tools available.
@@ -38,7 +38,7 @@ If you'd rather configure manually, the equivalent `~/.mcp.json` looks like:
   "mcpServers": {
     "yocoolab": {
       "command": "npx",
-      "args": ["-y", "@yocoolab/mcp-server@2"],
+      "args": ["-y", "@yocoolab/mcp-server@3"],
       "env": {
         "YOCOOLAB_API_URL": "https://app.yocoolab.com",
         "YOCOOLAB_TOKEN": "<your-yocoolab-jwt>",
@@ -51,7 +51,7 @@ If you'd rather configure manually, the equivalent `~/.mcp.json` looks like:
 }
 ```
 
-The `@2` version pin keeps you on the v2 major line — you'll receive bug fixes and new features automatically, but a future v3 with breaking changes won't break your setup. (Pin to `@1` if you need Node 18 support — v1.x will receive security patches for 90 days after v2.0.)
+The `@3` version pin keeps you on the v3 major line — you'll receive bug fixes and new features automatically, but a future v4 with breaking changes won't break your setup. v3.0.0 removed the activity monitor and no longer writes Claude Code hooks into `~/.claude/settings.json`; see [CHANGELOG.md](./CHANGELOG.md) if you are upgrading from v2.
 
 ## Requirements
 
@@ -63,7 +63,7 @@ The `@2` version pin keeps you on the v2 major line — you'll receive bug fixes
 
 | Env var | Required | Default | Description |
 |---|---|---|---|
-| `YOCOOLAB_TOKEN` | no | — | Your Yocoolab JWT (from the Chrome extension). When unset, thread feedback tools are disabled but bridge / companion / activity tools still work. |
+| `YOCOOLAB_TOKEN` | no | — | Your Yocoolab JWT (from the Chrome extension). When unset, thread feedback tools are disabled but bridge / companion / selection tools still work. |
 | `YOCOOLAB_API_URL` | no | `https://app.yocoolab.com` | Yocoolab API base URL |
 | `GITHUB_TOKEN` | only for PR tools | — | GitHub PAT with `repo` scope. **Auto-detected** — if `gh` CLI is installed and authenticated (`gh auth token`), no env var is needed. Placeholder values like `<your GitHub PAT>` are detected and safely ignored. |
 | `YOCOOLAB_BRIDGE_PORT` | no | `9800` | Local port for the HTTP bridge to the Chrome extension |
@@ -90,7 +90,7 @@ The server exposes tools across several categories:
 - **Threads** — `list_open_threads`, `get_thread_context`, `add_thread_message`, `mark_thread_addressed`, `create_pr_for_thread`
   - On a link-only project (no GitHub App connection) open the PR with your own git/`gh`, then call `mark_thread_addressed` with `pr_url` (and `pr_branch`, `preview_url` when you have them). The PR fields land on the thread and the preview link goes into the review message; `get_thread_context` prints the project's repo links so you know which repository it points at. `create_pr_for_thread` remains for GitHub-connected `owner/name` workspaces.
 - **Selection / Bridge** — `get_latest_selection`, `get_selection_history`, `get_element_context`, `find_source_for_selection`, `ai_analyze_page`
-- **Activity** — `get_recent_events`, `get_activity_summary`, `get_files_touched`, `get_companion_messages`, `reply_to_companion`
+- **Companion** — `get_companion_messages`, `reply_to_companion`
 - **AI** — `get_ai_conversations`
 - **Deployment** — `get_deployment_preview`
 - **Pendo (optional)** — `pendo_list_guides`, `pendo_page_analytics`, `pendo_feature_usage`, `pendo_track_event`
@@ -101,7 +101,7 @@ For full tool descriptions and parameters, your MCP client will list them after 
 
 **`yocoolab-mcp: command not found`** — make sure you're on v1.0.1 or newer. Run `npx -y @yocoolab/mcp-server@latest setup` to get the current release.
 
-**`[yocoolab] Warning: YOCOOLAB_TOKEN not set`** — thread feedback tools are disabled without a token, but bridge / companion / activity tools still work. To enable everything, run `yocoolab-mcp setup` to (re)generate the config with your JWT.
+**`[yocoolab] Warning: YOCOOLAB_TOKEN not set`** — thread feedback tools are disabled without a token, but bridge / companion / selection tools still work. To enable everything, run `yocoolab-mcp setup` to (re)generate the config with your JWT.
 
 **Tools don't appear in your agent after install** — restart your agent completely (quit & reopen). MCP servers load at startup.
 

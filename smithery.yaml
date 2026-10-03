@@ -12,7 +12,7 @@ startCommand:
       yocoolabToken:
         type: string
         title: Yocoolab token
-        description: Your Yocoolab JWT, from the Chrome extension settings or app.yocoolab.com. Without it, thread feedback tools are disabled but bridge, companion and activity tools still work.
+        description: Your Yocoolab JWT, from the Chrome extension settings or app.yocoolab.com. Without it, thread feedback tools are disabled but bridge, companion and selection tools still work.
       yocoolabApiUrl:
         type: string
         title: Yocoolab API URL

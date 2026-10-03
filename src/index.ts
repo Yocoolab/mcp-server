@@ -32,16 +32,6 @@ import { handlePendoPageAnalytics } from './tools/pendo-page-analytics.js';
 import { handlePendoTrackEvent } from './tools/pendo-track-event.js';
 import { handlePendoListGuides } from './tools/pendo-list-guides.js';
 
-// Activity monitor imports
-import { ActivityEventStore } from './event-store.js';
-import { SessionManager } from './session-manager.js';
-import { attachActivityWs } from './ws-activity.js';
-import { ensureHooksInstalled } from './hook-installer.js';
-import { handleGetActivitySummary } from './tools/activity-summary.js';
-import { handleGetRecentEvents } from './tools/activity-recent.js';
-import { handleGetFilesTouched } from './tools/activity-files.js';
-import { handleGetDashboardUrl } from './tools/activity-dashboard.js';
-
 const SUBCOMMAND = process.argv[2];
 
 if (SUBCOMMAND === "setup" || SUBCOMMAND === "init") {
@@ -132,7 +122,7 @@ function startServer(): void {
   
   if (!YOCOOLAB_TOKEN) {
     process.stderr.write('[yocoolab] Warning: YOCOOLAB_TOKEN not set — thread feedback tools will be disabled.\n');
-    process.stderr.write('[yocoolab] Bridge, companion chat, and activity monitor tools will still work.\n');
+    process.stderr.write('[yocoolab] Bridge, companion chat, and selection tools will still work.\n');
     process.stderr.write('[yocoolab] Get a token at https://yocoolab.com/settings → API Tokens\n');
   }
   
@@ -141,25 +131,9 @@ function startServer(): void {
   const github = GITHUB_TOKEN ? new GitHubClient(GITHUB_TOKEN) : null;
   const pendo = PENDO_INTEGRATION_KEY ? new PendoClient(PENDO_INTEGRATION_KEY) : null;
   
-  // ─── Activity monitor setup ──────────────────────────────────────────
-  try {
-    ensureHooksInstalled();
-  } catch (err) {
-    process.stderr.write(`[yocoolab] Hook installation failed (non-fatal): ${err}\n`);
-  }
-  
-  const activityEventStore = new ActivityEventStore(1000);
-  activityEventStore.loadFromDisk();
-  
-  const sessionManager = new SessionManager();
-  // Replay loaded events through session manager to restore session state
-  for (const event of activityEventStore.recent(activityEventStore.count())) {
-    sessionManager.processEvent(event);
-  }
-  
-  // Initialize Bridge infrastructure (now includes activity stores)
+  // Initialize Bridge infrastructure
   const selectionStore = new SelectionStore(50);
-  const bridge = startHttpBridge(YOCOOLAB_BRIDGE_PORT, selectionStore, activityEventStore, sessionManager);
+  const bridge = startHttpBridge(YOCOOLAB_BRIDGE_PORT, selectionStore);
   const { emitThreadUpdate, getCompanionMessages, postCompanionReply } = bridge;
   
   // ─── Register this agent with the bridge ────────────────────────────
@@ -282,28 +256,6 @@ function startServer(): void {
       return { ...result, content: [...alert, ...result.content] };
     };
   }
-  
-  // Attach WebSocket for activity streaming
-  const activityWs = attachActivityWs(bridge.server, activityEventStore, sessionManager);
-  
-  // Wire activity events to WS broadcast
-  bridge.onActivityEvent((event) => {
-    activityWs.broadcast(event);
-    const session = sessionManager.getSession(event.session_id);
-    if (session) {
-      activityWs.broadcastSessionUpdate(session);
-    }
-  });
-  
-  // Graceful shutdown
-  process.on('SIGINT', () => {
-    activityEventStore.close();
-    process.exit(0);
-  });
-  process.on('SIGTERM', () => {
-    activityEventStore.close();
-    process.exit(0);
-  });
   
   // Create MCP server
   const server = new McpServer({
@@ -576,46 +528,6 @@ function startServer(): void {
       withCompanion(async (args) => handlePendoListGuides(pendo, args))
     );
   }
-  
-  // ─── Activity monitor tools ────────────────────────────────────────────
-  
-  server.tool(
-    'get_activity_summary',
-    'Get a high-level summary of Claude Code activity: total events, active sessions, tool usage breakdown, files touched, and error count.',
-    {},
-    withCompanion(async () => {
-      return handleGetActivitySummary(activityEventStore, sessionManager);
-    })
-  );
-  
-  server.tool(
-    'get_recent_events',
-    'Get the most recent Claude Code activity events (tool calls, prompts, errors). Shows timestamps, tool names, and key details.',
-    {
-      limit: z.number().optional().describe('Number of recent events to return (default: 10, max: 50)'),
-    },
-    withCompanion(async (args) => {
-      return handleGetRecentEvents(activityEventStore, args.limit);
-    })
-  );
-  
-  server.tool(
-    'get_files_touched',
-    'List all files that have been read, written, or edited across Claude Code sessions. Shows file paths with session counts.',
-    {},
-    withCompanion(async () => {
-      return handleGetFilesTouched(sessionManager);
-    })
-  );
-  
-  server.tool(
-    'get_dashboard_url',
-    'Get the URL for the real-time activity monitoring dashboard. Open in a browser to see live Claude Code activity, tool usage charts, and session timelines.',
-    {},
-    withCompanion(async () => {
-      return handleGetDashboardUrl(YOCOOLAB_BRIDGE_PORT);
-    })
-  );
   
   // Start server
   async function main() {

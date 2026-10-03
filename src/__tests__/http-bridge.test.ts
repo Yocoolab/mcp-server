@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { SelectionStore } from '../selection-store.js';
-import { startHttpBridge } from '../http-bridge.js';
+import { startHttpBridge, type BridgeResult } from '../http-bridge.js';
 
 // Mock child_process.execFile to prevent macOS notifications during tests
 vi.mock('node:child_process', () => ({
@@ -42,24 +42,20 @@ function validPayload(overrides: Record<string, unknown> = {}) {
   });
 }
 
-// FIXME(v1.1.0): startHttpBridge() return shape changed — it no longer returns a raw http.Server.
-// Tests fail with "server.on is not a function" / "server.close is not a function". The bridge now
-// returns an object with helper functions (emitThreadUpdate, getCompanionMessages, postCompanionReply)
-// rather than the underlying server. To re-enable: refactor tests to use a fresh port + supertest-style
-// HTTP requests instead of binding directly to the returned server. Tracking: TODO-issue.
-describe.skip('HTTP Bridge', () => {
+describe('HTTP Bridge', () => {
+  let bridge: BridgeResult;
   let server: http.Server;
   let store: SelectionStore;
   let port: number;
 
   beforeEach(async () => {
     store = new SelectionStore();
-    // Use port 0 to get a random available port
-    server = startHttpBridge(0, store);
+    // Port 0 → random free port; startHttpBridge calls listen() synchronously
+    bridge = startHttpBridge(0, store);
+    server = bridge.server;
     await new Promise<void>((resolve) => {
-      server.on('listening', () => {
-        const addr = server.address() as { port: number };
-        port = addr.port;
+      server.once('listening', () => {
+        port = (server.address() as { port: number }).port;
         resolve();
       });
     });
@@ -69,13 +65,23 @@ describe.skip('HTTP Bridge', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  it('GET /health returns status ok with selection count', async () => {
+  it('returns the bridge helpers and no activity hooks', () => {
+    expect(typeof bridge.emitThreadUpdate).toBe('function');
+    expect(typeof bridge.getCompanionMessages).toBe('function');
+    expect(typeof bridge.postCompanionReply).toBe('function');
+    expect(typeof bridge.onCompanionMessage).toBe('function');
+    expect('onActivityEvent' in bridge).toBe(false);
+  });
+
+  it('GET /health returns status ok with bridge stats and no monitor block', async () => {
     const res = await request(port, 'GET', '/health');
     expect(res.status).toBe(200);
     const json = JSON.parse(res.body);
     expect(json.status).toBe('ok');
-    expect(json.selections).toBe(0);
-    expect(json.clients).toBe(1);
+    expect(json.bridge.selections).toBe(0);
+    expect(json.bridge.sseClients).toBe(0);
+    expect(Array.isArray(json.bridge.agents)).toBe(true);
+    expect(json.monitor).toBeUndefined();
   });
 
   it('POST /event with valid payload returns 200 and correlationId', async () => {
@@ -90,8 +96,7 @@ describe.skip('HTTP Bridge', () => {
   it('POST /event with invalid JSON returns 400', async () => {
     const res = await request(port, 'POST', '/event', 'not json{{{');
     expect(res.status).toBe(400);
-    const json = JSON.parse(res.body);
-    expect(json.error).toBe('Invalid JSON');
+    expect(JSON.parse(res.body).error).toBe('Invalid JSON');
   });
 
   it('POST /event with missing type field returns 400', async () => {
@@ -100,8 +105,7 @@ describe.skip('HTTP Bridge', () => {
       page: { url: 'https://example.com' },
     }));
     expect(res.status).toBe(400);
-    const json = JSON.parse(res.body);
-    expect(json.error).toBe('Invalid payload');
+    expect(JSON.parse(res.body).error).toBe('Invalid payload');
   });
 
   it('POST /event with missing element returns 400', async () => {
@@ -122,45 +126,38 @@ describe.skip('HTTP Bridge', () => {
 
   it('POST /event generates correlationId if not provided', async () => {
     const res = await request(port, 'POST', '/event', validPayload());
-    const json = JSON.parse(res.body);
-    expect(json.correlationId).toMatch(/^[0-9a-f-]+$/);
+    expect(JSON.parse(res.body).correlationId).toMatch(/^[0-9a-f-]+$/);
   });
 
   it('POST /event preserves correlationId if provided', async () => {
     const res = await request(port, 'POST', '/event', validPayload({ correlationId: 'my-custom-id' }));
-    const json = JSON.parse(res.body);
-    expect(json.correlationId).toBe('my-custom-id');
+    expect(JSON.parse(res.body).correlationId).toBe('my-custom-id');
   });
 
   it('POST /event adds timestamp if not provided', async () => {
     await request(port, 'POST', '/event', validPayload());
     const latest = store.latest()!;
-    expect(latest.timestamp).toBeDefined();
     expect(typeof latest.timestamp).toBe('number');
   });
 
   it('GET /selections/latest returns null when empty', async () => {
     const res = await request(port, 'GET', '/selections/latest');
     expect(res.status).toBe(200);
-    const json = JSON.parse(res.body);
-    expect(json.selection).toBeNull();
+    expect(JSON.parse(res.body).selection).toBeNull();
   });
 
   it('GET /selections/latest returns most recent selection', async () => {
     await request(port, 'POST', '/event', validPayload({ correlationId: 'sel-1' }));
     await request(port, 'POST', '/event', validPayload({ correlationId: 'sel-2' }));
-
     const res = await request(port, 'GET', '/selections/latest');
     expect(res.status).toBe(200);
-    const json = JSON.parse(res.body);
-    expect(json.selection.correlationId).toBe('sel-2');
+    expect(JSON.parse(res.body).selection.correlationId).toBe('sel-2');
   });
 
   it('GET /selections?limit=N returns selections in reverse order', async () => {
     await request(port, 'POST', '/event', validPayload({ correlationId: 'a' }));
     await request(port, 'POST', '/event', validPayload({ correlationId: 'b' }));
     await request(port, 'POST', '/event', validPayload({ correlationId: 'c' }));
-
     const res = await request(port, 'GET', '/selections?limit=2');
     expect(res.status).toBe(200);
     const json = JSON.parse(res.body);
@@ -176,17 +173,59 @@ describe.skip('HTTP Bridge', () => {
     expect(res.headers['access-control-allow-methods']).toContain('POST');
   });
 
-  it('unknown route returns 404', async () => {
-    const res = await request(port, 'GET', '/unknown');
-    expect(res.status).toBe(404);
+  it('agent registry: register then list', async () => {
+    const reg = await request(port, 'POST', '/agents/register', JSON.stringify({ id: 'test-agent', name: 'Test', type: 'custom' }));
+    expect(reg.status).toBe(200);
+    const list = await request(port, 'GET', '/agents');
+    expect(list.status).toBe(200);
+    expect(JSON.parse(list.body).agents.some((a: { id: string }) => a.id === 'test-agent')).toBe(true);
+    await request(port, 'DELETE', '/agents/test-agent');
+  });
+
+  it('companion: POST /companion/message is readable via GET /companion/messages', async () => {
+    const post = await request(port, 'POST', '/companion/message', JSON.stringify({ content: 'hello agent' }));
+    expect(post.status).toBe(200);
+    const res = await request(port, 'GET', '/companion/messages');
+    const json = JSON.parse(res.body);
+    expect(json.messages).toHaveLength(1);
+    expect(json.messages[0].content).toBe('hello agent');
   });
 
   it('GET /health reflects selection count after POST', async () => {
     await request(port, 'POST', '/event', validPayload());
     await request(port, 'POST', '/event', validPayload());
-
     const res = await request(port, 'GET', '/health');
-    const json = JSON.parse(res.body);
-    expect(json.selections).toBe(2);
+    expect(JSON.parse(res.body).bridge.selections).toBe(2);
+  });
+
+  it('unknown route returns 404', async () => {
+    const res = await request(port, 'GET', '/unknown');
+    expect(res.status).toBe(404);
+  });
+
+  // Regression: the activity monitor surface removed in 3.0.0 must stay gone
+  it.each([
+    ['POST', '/monitor/events', '{"session_id":"x","hook_event_name":"Stop"}'],
+    ['GET', '/monitor/api/events/recent', undefined],
+    ['GET', '/monitor/api/sessions', undefined],
+    ['GET', '/dashboard/', undefined],
+    ['GET', '/dashboard/index.html', undefined],
+  ])('%s %s returns 404 (activity monitor removed)', async (method, path, body) => {
+    const res = await request(port, method, path, body);
+    expect(res.status).toBe(404);
+  });
+
+  it('does not accept a WebSocket upgrade on /ws/activity', async () => {
+    const outcome = await new Promise<string>((resolve) => {
+      const req = http.request({
+        hostname: '127.0.0.1', port, method: 'GET', path: '/ws/activity',
+        headers: { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==' },
+      });
+      req.on('upgrade', () => resolve('upgraded'));
+      req.on('response', (res) => resolve(`response:${res.statusCode}`));
+      req.on('error', () => resolve('closed'));
+      req.end();
+    });
+    expect(outcome).not.toBe('upgraded');
   });
 });

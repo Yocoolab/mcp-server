@@ -1,26 +1,7 @@
 import http from 'node:http';
-import fs from 'node:fs';
-import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { v4 as uuidv4 } from 'uuid';
 import type { SelectionStore } from './selection-store.js';
-import type { ActivityEventStore } from './event-store.js';
-import type { SessionManager } from './session-manager.js';
-import type { ActivityEvent, RawHookPayload } from './activity-types.js';
-import { MAX_TOOL_RESPONSE_SIZE } from './activity-constants.js';
-const DASHBOARD_DIR = path.resolve(__dirname, '../dashboard');
-
-const MIME_TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-};
 
 export interface ConnectedAgent {
   id: string;
@@ -63,7 +44,6 @@ export interface BridgeResult {
   emitThreadUpdate: ThreadUpdateEmitter;
   getCompanionMessages: () => CompanionMessage[];
   postCompanionReply: (content: string) => void;
-  onActivityEvent: (callback: (event: ActivityEvent) => void) => void;
   onCompanionMessage: (callback: (msg: CompanionMessage) => void) => void;
 }
 
@@ -83,49 +63,18 @@ function notifySelection(tag: string, text: string, pageUrl: string): void {
   try {
     urlPath = new URL(pageUrl).pathname;
   } catch { /* ignore invalid URLs */ }
+  // Element text is user content: a quote or backslash would break the
+  // AppleScript string ("syntax error: A identifier can't go after this").
+  const esc = (v: string) => v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   execFile('osascript', [
     '-e',
-    `display notification "${label} on ${urlPath}" with title "Yocoolab Bridge" subtitle "Element captured"`,
+    `display notification "${esc(label)} on ${esc(urlPath)}" with title "Yocoolab Bridge" subtitle "Element captured"`,
   ], (err) => {
     if (err) process.stderr.write(`[yocoolab] Notification error: ${err.message}\n`);
   });
 }
 
-function rawToEvent(raw: RawHookPayload): ActivityEvent {
-  let toolResponse = raw.tool_response;
-  if (typeof toolResponse === 'string' && toolResponse.length > MAX_TOOL_RESPONSE_SIZE) {
-    toolResponse = toolResponse.slice(0, MAX_TOOL_RESPONSE_SIZE) + '\n... [truncated]';
-  }
-
-  return {
-    id: uuidv4(),
-    timestamp: Date.now(),
-    received_at: Date.now(),
-    session_id: raw.session_id || 'unknown',
-    hook_event_name: raw.hook_event_name as ActivityEvent['hook_event_name'],
-    cwd: raw.cwd || '',
-    transcript_path: raw.transcript_path || '',
-    tool_name: raw.tool_name,
-    tool_input: raw.tool_input as ActivityEvent['tool_input'],
-    tool_response: toolResponse,
-    tool_use_id: raw.tool_use_id,
-    error: raw.error,
-    source: raw.source,
-    prompt: raw.prompt,
-    agent_id: raw.agent_id,
-    agent_type: raw.agent_type,
-    stop_hook_active: raw.stop_hook_active,
-    message: raw.message,
-    notification_type: raw.notification_type,
-  };
-}
-
-export function startHttpBridge(
-  port: number,
-  store: SelectionStore,
-  activityEventStore: ActivityEventStore,
-  sessionManager: SessionManager,
-): BridgeResult {
+export function startHttpBridge(port: number, store: SelectionStore): BridgeResult {
   // SSE client connections
   const sseClients = new Set<http.ServerResponse>();
 
@@ -135,9 +84,6 @@ export function startHttpBridge(
 
   // Companion reply queue (for polling fallback when SSE isn't connected)
   const companionReplies: string[] = [];
-
-  // Activity event callback (set by caller to trigger WS broadcast)
-  let activityCallback: ((event: ActivityEvent) => void) | null = null;
 
   // Companion message callback (set by caller to trigger MCP notification)
   let companionCallback: ((msg: CompanionMessage) => void) | null = null;
@@ -188,10 +134,6 @@ export function startHttpBridge(
     emitCompanionReply(content);
   }
 
-  function onActivityEvent(callback: (event: ActivityEvent) => void): void {
-    activityCallback = callback;
-  }
-
   function onCompanionMessage(callback: (msg: CompanionMessage) => void): void {
     companionCallback = callback;
   }
@@ -209,52 +151,7 @@ export function startHttpBridge(
 
     const url = new URL(req.url || '/', `http://localhost:${port}`);
 
-    // ─── Activity Monitor routes ──────────────────────────────────
-
-    // POST /monitor/events — hook event ingestion (from send-event.sh)
-    if (req.method === 'POST' && url.pathname === '/monitor/events') {
-      let body = '';
-      req.on('data', (chunk: string) => { body += chunk; });
-      req.on('end', () => {
-        try {
-          const raw: RawHookPayload = JSON.parse(body);
-          const event = rawToEvent(raw);
-
-          activityEventStore.push(event);
-          sessionManager.processEvent(event);
-
-          // Trigger WS broadcast via callback
-          if (activityCallback) activityCallback(event);
-
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: true, id: event.id }));
-        } catch (err) {
-          process.stderr.write(`[yocoolab] Failed to process hook event: ${err}\n`);
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: 'Invalid payload' }));
-        }
-      });
-      return;
-    }
-
-    // GET /monitor/api/events/recent
-    if (req.method === 'GET' && url.pathname === '/monitor/api/events/recent') {
-      const limit = parseInt(url.searchParams.get('limit') || '200', 10);
-      const events = activityEventStore.recent(limit);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(events));
-      return;
-    }
-
-    // GET /monitor/api/sessions
-    if (req.method === 'GET' && url.pathname === '/monitor/api/sessions') {
-      const sessions = sessionManager.getAllSessions();
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(sessions));
-      return;
-    }
-
-    // ─── Bridge routes (existing) ─────────────────────────────────
+    // ─── Bridge routes ────────────────────────────────────────────
 
     // SSE endpoint for thread updates
     if (req.method === 'GET' && url.pathname === '/thread-updates') {
@@ -275,6 +172,7 @@ export function startHttpBridge(
       return;
     }
 
+    // POST /event — element selection from the Chrome extension (feeds /selections/*)
     if (req.method === 'POST' && url.pathname === '/event') {
       let body = '';
       req.on('data', (chunk: string) => {
@@ -331,10 +229,6 @@ export function startHttpBridge(
             selections: store.count(),
             sseClients: sseClients.size,
             agents: Array.from(agentRegistry.values()),
-          },
-          monitor: {
-            events: activityEventStore.count(),
-            sessions: sessionManager.getAllSessions().length,
           },
           uptime: process.uptime(),
         })
@@ -498,13 +392,6 @@ export function startHttpBridge(
       return;
     }
 
-    // ─── Dashboard static files ───────────────────────────────────
-
-    if (req.method === 'GET' && url.pathname.startsWith('/dashboard')) {
-      serveDashboard(url.pathname.replace('/dashboard', '') || '/', res);
-      return;
-    }
-
     res.writeHead(404);
     res.end('Not Found');
   });
@@ -534,15 +421,13 @@ export function startHttpBridge(
     });
 
     server.listen(port, '127.0.0.1', () => {
-      process.stderr.write(`[yocoolab] HTTP bridge + monitor listening on http://127.0.0.1:${port}\n`);
-      process.stderr.write(`[yocoolab] Dashboard: http://localhost:${port}/dashboard/\n`);
-      process.stderr.write(`[yocoolab] Activity WS: ws://127.0.0.1:${port}/ws/activity\n`);
+      process.stderr.write(`[yocoolab] HTTP bridge listening on http://127.0.0.1:${port}\n`);
     });
   }
 
   tryListen();
 
-  return { server, emitThreadUpdate, getCompanionMessages, postCompanionReply, onActivityEvent, onCompanionMessage };
+  return { server, emitThreadUpdate, getCompanionMessages, postCompanionReply, onCompanionMessage };
 }
 
 function isValidPayload(data: unknown): boolean {
@@ -553,39 +438,4 @@ function isValidPayload(data: unknown): boolean {
     typeof d.element === 'object' &&
     typeof d.page === 'object'
   );
-}
-
-function serveDashboard(pathname: string, res: http.ServerResponse): void {
-  let filePath = path.join(DASHBOARD_DIR, pathname === '/' ? 'index.html' : pathname);
-
-  // Security: prevent directory traversal
-  if (!filePath.startsWith(DASHBOARD_DIR)) {
-    res.writeHead(403);
-    res.end('Forbidden');
-    return;
-  }
-
-  // SPA fallback
-  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-    filePath = path.join(DASHBOARD_DIR, 'index.html');
-  }
-
-  if (!fs.existsSync(filePath)) {
-    res.writeHead(404, { 'Content-Type': 'text/html' });
-    res.end('<h1>Dashboard not built</h1><p>Dashboard static files not found.</p>');
-    return;
-  }
-
-  const ext = path.extname(filePath);
-  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
-  if (pathname.includes('/assets/')) {
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-  } else {
-    res.setHeader('Cache-Control', 'no-cache');
-  }
-
-  const stream = fs.createReadStream(filePath);
-  res.writeHead(200, { 'Content-Type': contentType });
-  stream.pipe(res);
 }

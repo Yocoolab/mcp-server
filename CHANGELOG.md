@@ -4,6 +4,19 @@ All notable changes to `@yocoolab/mcp-server` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.0.0 — 2026-10-03
+
+### Removed
+- **Hook auto-install.** The server no longer writes Claude Code hooks into `~/.claude/settings.json` on startup (`src/hook-installer.ts` is gone). Existing installs keep whatever is already in that file; remove the `hooks/send-event.sh` entries by hand if you had them.
+- `hooks/send-event.sh` (the script those hooks called).
+- The activity monitor and its tools: `get_activity_summary`, `get_recent_events`, `get_files_touched`, `get_dashboard_url`.
+- The bridge routes `POST /monitor/events`, `GET /monitor/api/events/recent`, `GET /monitor/api/sessions`, the `/dashboard/*` static UI, and the `/ws/activity` WebSocket. `/health` no longer carries a `monitor` block.
+- The `ws` dependency (nothing uses WebSockets any more).
+
+### Unchanged
+- Companion chat (`get_companion_messages`, `reply_to_companion`, `/companion/*`), selections (`get_latest_selection`, `get_selection_history`, `get_element_context`, `find_source_for_selection`, `POST /event`, `/selections/*`), agent discovery (`/agents`, `/agents/register`), `/thread-updates` SSE and `/health` all work exactly as in 2.5.0.
+- The opt-in scripts `hooks/check-companion.sh`, `hooks/check-selection.sh` and `hooks/bridge-status.sh` still ship; nothing installs them for you.
+
 ## 2.5.0 — 2026-10-02
 
 - `mark_thread_addressed` accepts optional `pr_url`, `pr_branch` and `preview_url`, so an agent on a link-only project (`project:<uuid>` workspace) can record the PR it opened itself. The PR number is derived from GitHub `/pull/N` or GitLab `/merge_requests/N` URLs; the preview link is posted in the review message. The stage move happens first and is never undone by a rejected link.
