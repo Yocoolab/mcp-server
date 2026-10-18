@@ -1,5 +1,5 @@
 import type { ClaudePromptContext } from './types.js';
-import { PROJECT_PR_LINKS, isOwnerNameKey } from './feature-flags.js';
+import { AGENT_BRIEF, PROJECT_PR_LINKS, isOwnerNameKey } from './feature-flags.js';
 
 export function generateClaudePrompt(ctx: ClaudePromptContext): string {
   const { elementPayload, candidates, workspaceRoot, threadContext } = ctx;
@@ -74,7 +74,7 @@ Complete all of the following steps in order:
 
 ### Step 2: Commit, push, and open the Pull Request yourself
 - This thread belongs to a link-only project ("${threadContext.repo}"). Yocoolab has no write access to the repository, so do NOT use \`create_pr_for_thread\` — it only works for GitHub-App-connected "owner/name" repos.
-- The thread's repo_links tell you which repository/branch the project points at${linkLines ? ':\n' + linkLines : ' (see "Repo links" in get_thread_context for thread "' + threadContext.threadId + '")'}. Work in your own checkout of that repository.
+- The thread's repo_links tell you which repository/branch the project points at${linkLines ? ':\n' + linkLines : AGENT_BRIEF ? ' (get_thread_context for thread "' + threadContext.threadId + '" names it under Where › Repository, with how to check you are in it)' : ' (see "Repo links" in get_thread_context for thread "' + threadContext.threadId + '")'}. Work in your own checkout of that repository.
 - Commit the change on a new branch in your checkout (e.g. "fix/<short-description>") and push it.
 - Open the PR with the GitHub CLI (\`gh pr create\`) or your Git host's UI/API. Note the PR URL.
 - If your host deploys a preview for the branch (Vercel, Netlify, GitHub Pages, …), note that preview URL too.

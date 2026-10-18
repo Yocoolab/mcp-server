@@ -9,7 +9,7 @@ import { handleGetContext } from '../../tools/get-context.js';
 import { handleListThreads } from '../../tools/list-threads.js';
 import { handleCreatePr } from '../../tools/create-pr.js';
 import { generateClaudePrompt } from '../../prompt-template.js';
-import { isOwnerNameKey, PROJECT_PR_LINKS } from '../../feature-flags.js';
+import { AGENT_BRIEF, isOwnerNameKey, PROJECT_PR_LINKS } from '../../feature-flags.js';
 import type { YocoolabApiClient, ThreadDetail, ThreadSummary } from '../../api-client.js';
 import type { GitHubClient } from '../../github-client.js';
 import type { ClaudePromptContext } from '../../types.js';
@@ -125,6 +125,21 @@ describe.skipIf(!PROJECT_PR_LINKS)('create_pr_for_thread on a link-only project'
   });
 });
 
+describe.skipIf(!PROJECT_PR_LINKS)('create_pr_for_thread on a link-only project with no repo links', () => {
+  it('points at where get_thread_context names the repository, not at an empty field', async () => {
+    const api = {
+      getThread: vi.fn().mockResolvedValue(baseThread({ repo_links: [] })),
+      updateThread: vi.fn(),
+      getWorkingBranch: vi.fn(),
+    } as unknown as YocoolabApiClient;
+    const github = { createPullRequest: vi.fn() } as unknown as GitHubClient;
+
+    const result = await handleCreatePr(api, github, { thread_id: 'thread-1', title: 't', body: 'b', files: [] });
+    const text = result.content[0].text;
+    expect(text).toContain(AGENT_BRIEF ? '(get_thread_context names it under Where › Repository)' : '(see repo_links in get_thread_context)');
+  });
+});
+
 describe.skipIf(!PROJECT_PR_LINKS)('prompt template workflow branches on the key shape', () => {
   function ctx(repo: string, repoLinks?: Array<{ role: string; url: string }>): ClaudePromptContext {
     return {
@@ -167,6 +182,9 @@ describe.skipIf(!PROJECT_PR_LINKS)('prompt template workflow branches on the key
 
   it('points at get_thread_context when repo_links were not passed in', () => {
     const prompt = generateClaudePrompt(ctx(PROJECT_KEY));
-    expect(prompt).toContain('see "Repo links" in get_thread_context');
+    // With the brief, get_thread_context has no "Repo links" section: the
+    // repository is under Where › Repository.
+    expect(prompt).toContain(AGENT_BRIEF ? 'names it under Where › Repository' : 'see "Repo links" in get_thread_context');
+    expect(prompt).toContain('thread "thread-1"');
   });
 });
