@@ -4,16 +4,27 @@ All notable changes to `@yocoolab/mcp-server` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 2.5.1 — 2026-10-18
+
+Security fixes for the local bridge on port 9800, backported from the 3.x line. No tool, argument or output changes.
 
 ### Security
 - `POST /event` drops the payload's `auth` block before storing it. Older Chrome extension builds put the person's Yocoolab JWT there (`auth: { token, apiUrl }`) on Send to Agent; the bridge kept it and served it from `/selections*` and `get_latest_selection`. Nothing in this server ever read it.
 - The bridge no longer answers every route with `Access-Control-Allow-Origin: *`. CORS now follows who actually calls each route from a browser:
   - `GET /agents` and `GET /health` keep `*` (the extension's page-world script probes `/agents` from the site's own origin for the agent picker and the Agent gate). A Private Network Access preflight is granted on these two only.
   - `POST /event` and `GET /thread-updates` echo the origin only for a browser-extension origin (`chrome-extension://`, `moz-extension://`, `safari-web-extension://`). The extension's background worker calls them, and without a granted host permission for 127.0.0.1 its requests are CORS-checked.
-  - `/selections*`, `/companion*`, `/agents/register` and `DELETE /agents/:id` send no CORS headers. Their callers are local processes (the MCP server itself, hooks, curl).
-  - The activity monitor's reads, `GET /monitor/api/events/recent` and `GET /monitor/api/sessions`, are treated like `/event`: local callers and a browser-extension origin (extension builds before 1.9.202 poll them) only. They carry every prompt, tool input and tool output the Claude Code hooks report, and any site could read them. `POST /monitor/events` (the hooks, over curl) sends no CORS headers; the `/dashboard/*` static files load for anyone, with no CORS grant.
-- A request from a web page (an `Origin` that is not a browser extension, or `Sec-Fetch-Site: cross-site`/`same-site`) to anything but `GET /agents`, `GET /health` and `/dashboard/*` gets `403`. CORS alone did not stop a site from sending a text/plain POST (no preflight) that faked a selection, queued a companion message for the agent or registered a phantom agent. Local callers send no `Origin` and are unaffected.
+  - The activity monitor's reads, `GET /monitor/api/events/recent` and `GET /monitor/api/sessions`, are treated like `/event`: local callers and a browser-extension origin (extension builds before 1.9.202 poll them) only. They carry every prompt, tool input and tool output the Claude Code hooks report, and any site could read them.
+  - `/selections*`, `/companion*`, `/agents/register`, `DELETE /agents/:id` and `POST /monitor/events` send no CORS headers. Their callers are local processes (the MCP server itself, the hooks, curl). The `/dashboard/*` static files load for anyone, with no CORS grant.
+- A request from a web page (an `Origin` that is not a browser extension, or any `Sec-Fetch-Site` other than `none` without an `Origin`) to anything but `GET /agents`, `GET /health` and `/dashboard/*` gets `403`. CORS alone did not stop a site from sending a text/plain POST (no preflight) that faked a selection, queued a companion message for the agent, registered a phantom agent or posted fake hook events.
+- Every browser caller — any installed browser extension included — is refused (`403`) on the local-only routes (`/selections*`, `/companion*`, `/agents/register`, `DELETE /agents/:id`, `POST /monitor/events`). The Yocoolab extension never calls them. `Sec-Fetch-Site: none` without an `Origin` — what an extension holding a host permission for 127.0.0.1 sends on its GETs — may still reach `POST /event`, `/thread-updates` and the monitor reads.
+- Every request needs a loopback `Host` (`127.0.0.1`, `localhost` or `[::1]`, any port), else `421`. A DNS-rebinding page's same-origin requests carry no `Origin` and no `Sec-Fetch-*`, so they were served as a local process: `/selections*`, `/companion/*` and `/monitor/api/*` could be read and drained.
+- The `/ws/activity` WebSocket checks its handshake the same way: a non-loopback `Host` gets `421` and a web-page `Origin` `403`, before any upgrade. WebSockets are not subject to CORS and the upgrade never reached the gate, so any open site could connect and receive the last 200 hook events and every new one. Local clients and an extension origin still connect.
+- macOS notifications pass their text to a fixed `osascript` `on run argv` script as arguments. The selection notification put the page's element text into AppleScript source unescaped, and the companion notification escaped quotes but not backslashes, so either could end the string literal and run `do shell script`.
+- `GET /agents` and `GET /health` give a browser caller only the last folder of each agent's `cwd` (what the agent picker shows), not the full path with the local username and project layout. Local callers still get the whole path.
+
+### Compatibility
+- Unchanged for the Yocoolab extension (Send to Agent, the `/thread-updates` stream, the page-world agent picker, and the activity panel of builds before 1.9.202), the MCP server's own calls, the hooks and curl.
+- A page served from the bridge's own origin (a locally built `/dashboard`; the package has never shipped one) can no longer read `/monitor/api/*` or open `/ws/activity`.
 
 ## 2.5.0 — 2026-10-02
 
