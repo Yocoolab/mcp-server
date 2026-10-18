@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 - `POST /event` drops the payload's `auth` block before storing it. Older Chrome extension builds put the person's Yocoolab JWT there (`auth: { token, apiUrl }`) on Send to Agent; the bridge kept it and served it from `/selections*` and `get_latest_selection`. Nothing in this server ever read it.
+- The bridge no longer answers every route with `Access-Control-Allow-Origin: *`. CORS now follows who actually calls each route from a browser:
+  - `GET /agents` and `GET /health` keep `*` (the extension's page-world script probes `/agents` from the site's own origin for the agent picker and the Agent gate). A Private Network Access preflight is granted on these two only.
+  - `POST /event` and `GET /thread-updates` echo the origin only for a browser-extension origin (`chrome-extension://`, `moz-extension://`, `safari-web-extension://`). The extension's background worker calls them, and without a granted host permission for 127.0.0.1 its requests are CORS-checked.
+  - `/selections*`, `/companion*`, `/agents/register` and `DELETE /agents/:id` send no CORS headers. Their callers are local processes (the MCP server itself, hooks, curl).
+  - The activity monitor's reads, `GET /monitor/api/events/recent` and `GET /monitor/api/sessions`, are treated like `/event`: local callers and a browser-extension origin (extension builds before 1.9.202 poll them) only. They carry every prompt, tool input and tool output the Claude Code hooks report, and any site could read them. `POST /monitor/events` (the hooks, over curl) sends no CORS headers; the `/dashboard/*` static files load for anyone, with no CORS grant.
+- A request from a web page (an `Origin` that is not a browser extension, or `Sec-Fetch-Site: cross-site`/`same-site`) to anything but `GET /agents`, `GET /health` and `/dashboard/*` gets `403`. CORS alone did not stop a site from sending a text/plain POST (no preflight) that faked a selection, queued a companion message for the agent or registered a phantom agent. Local callers send no `Origin` and are unaffected.
 
 ## 2.5.0 — 2026-10-02
 

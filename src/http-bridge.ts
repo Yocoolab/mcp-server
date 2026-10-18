@@ -197,21 +197,52 @@ export function startHttpBridge(
   }
 
   const server = http.createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    const url = new URL(req.url || '/', `http://localhost:${port}`);
 
-    if (req.method === 'OPTIONS') {
+    // CORS is decided per route (see routeAudience). A preflight is judged by
+    // the method it asks for.
+    const isPreflight = req.method === 'OPTIONS';
+    const method = isPreflight
+      ? String(req.headers['access-control-request-method'] || '').toUpperCase()
+      : (req.method || '');
+    const audience = routeAudience(method, url.pathname);
+    const caller = browserCaller(req.headers);
+
+    // A web page reaches only the page-world routes. Withholding CORS headers
+    // is not enough on its own: a text/plain POST goes out without a
+    // preflight, so a page could still fake a selection, queue a companion
+    // message for the agent or register a phantom agent.
+    if (caller === 'web' && audience !== 'page' && audience !== 'dashboard') {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Forbidden origin' }));
+      return;
+    }
+
+    if (audience === 'page') {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    } else if (audience === 'extension') {
+      res.setHeader('Vary', 'Origin');
+      if (caller === 'extension') res.setHeader('Access-Control-Allow-Origin', String(req.headers.origin));
+    }
+
+    if (isPreflight) {
+      if (res.hasHeader('Access-Control-Allow-Origin')) {
+        res.setHeader('Access-Control-Allow-Methods', `${method}, OPTIONS`);
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        // Private Network Access preflight (a public page reaching 127.0.0.1):
+        // granted only on the routes the page world is meant to reach.
+        if (audience === 'page' && req.headers['access-control-request-private-network'] === 'true') {
+          res.setHeader('Access-Control-Allow-Private-Network', 'true');
+        }
+      }
       res.writeHead(204);
       res.end();
       return;
     }
 
-    const url = new URL(req.url || '/', `http://localhost:${port}`);
-
     // ─── Activity Monitor routes ──────────────────────────────────
 
-    // POST /monitor/events — hook event ingestion (from send-event.sh)
+    // POST /monitor/events — hook event ingestion (from send-event.sh, over curl)
     if (req.method === 'POST' && url.pathname === '/monitor/events') {
       let body = '';
       req.on('data', (chunk: string) => { body += chunk; });
@@ -254,7 +285,7 @@ export function startHttpBridge(
       return;
     }
 
-    // ─── Bridge routes (existing) ─────────────────────────────────
+    // ─── Bridge routes ────────────────────────────────────────────
 
     // SSE endpoint for thread updates
     if (req.method === 'GET' && url.pathname === '/thread-updates') {
@@ -548,6 +579,55 @@ export function startHttpBridge(
   tryListen();
 
   return { server, emitThreadUpdate, getCompanionMessages, postCompanionReply, onActivityEvent, onCompanionMessage };
+}
+
+/**
+ * Who may call a route from a browser. The bridge listens on 127.0.0.1 only,
+ * but every web page the person opens can still send it requests.
+ *
+ * - 'page': the extension's page-world script. comments-ui.js is injected into
+ *   the host page's MAIN world, so its fetch carries the page's origin; it
+ *   probes GET /agents for the agent picker and the Agent gate. GET /health
+ *   carries the same agent list plus two counters. → `Access-Control-Allow-Origin: *`.
+ * - 'extension': the extension's background worker (POST /event for Send to
+ *   Agent, the /thread-updates EventSource). Without a granted host permission
+ *   for 127.0.0.1 — the manifest only has optional ones — its requests are
+ *   CORS-checked and carry `Origin: chrome-extension://<id>`. → that origin is
+ *   echoed back; a web origin gets nothing.
+ *   The activity monitor's reads (GET /monitor/api/events/recent and
+ *   /monitor/api/sessions) are here too: extension builds before 1.9.202 poll
+ *   them from the background worker. They carry every prompt, tool input and
+ *   tool output the Claude Code hooks report, so a web page never gets them.
+ * - 'dashboard': GET /dashboard/* — the monitor's static UI files (the npm
+ *   package ships none and answers "Dashboard not built"). Nothing private;
+ *   any caller may load them, with no CORS headers.
+ * - 'local' (everything else: /selections*, /companion*, /agents/register,
+ *   DELETE /agents/:id, POST /monitor/events): agents, hooks and scripts on
+ *   this machine (Node, curl) send no Origin and need no CORS headers. → none,
+ *   and a web page is refused outright.
+ */
+type RouteAudience = 'page' | 'extension' | 'dashboard' | 'local';
+
+function routeAudience(method: string, pathname: string): RouteAudience {
+  if (method === 'GET' && (pathname === '/health' || pathname === '/agents')) return 'page';
+  if (method === 'POST' && pathname === '/event') return 'extension';
+  if (method === 'GET' && pathname === '/thread-updates') return 'extension';
+  if (method === 'GET' && (pathname === '/monitor/api/events/recent' || pathname === '/monitor/api/sessions')) return 'extension';
+  if (method === 'GET' && pathname.startsWith('/dashboard')) return 'dashboard';
+  return 'local';
+}
+
+const EXTENSION_ORIGIN = /^(chrome-extension|moz-extension|safari-web-extension):\/\/[A-Za-z0-9._-]+$/;
+
+/** 'extension' or 'web' for a browser caller, null for a local process. */
+function browserCaller(headers: http.IncomingHttpHeaders): 'extension' | 'web' | null {
+  const origin = headers.origin;
+  if (origin) return EXTENSION_ORIGIN.test(origin) ? 'extension' : 'web';
+  // A no-cors GET (an <img>, a no-cors fetch) carries no Origin, but the
+  // browser still marks where it came from.
+  const site = headers['sec-fetch-site'];
+  if (site === 'cross-site' || site === 'same-site') return 'web';
+  return null;
 }
 
 function isValidPayload(data: unknown): boolean {
