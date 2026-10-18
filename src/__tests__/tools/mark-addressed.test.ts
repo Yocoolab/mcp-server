@@ -346,26 +346,40 @@ describe.skipIf(!AGENT_BRIEF || !PROJECT_PR_LINKS)('handleMarkAddressed with POS
     expect(result.content[0].text).not.toContain('Links recorded');
   });
 
-  it('still derives the github.io pr-preview for an "owner/name" key, and hands it to the backend', async () => {
-    const preview = 'https://acme.github.io/design-system/pr-preview/pr-42/';
+  // The brief tells the agent "Preview: none … leave preview_url out" when
+  // the backend knows there is none (Pages publishes main, a Vercel-hosted
+  // repo with no deployment). A github.io pr-preview link made up here would
+  // be a 404 posted next to the agent's own "no preview".
+  it('never makes up a github.io pr-preview for an "owner/name" key: no preview_url, no thread read', async () => {
     const api = makeAddressedApi(
-      addressed({ message: { id: 'm9', content: `Fixed\n\nPreview: ${preview}` }, recorded: { pr_url: null, pr_number: null, pr_branch: null, preview_url: preview } }),
+      addressed({ message: { id: 'm9', content: 'Fixed, no preview' }, recorded: { pr_url: null, pr_number: null, pr_branch: null, preview_url: null } }),
       { repo: 'Acme/design-system', pr_number: 42 },
     );
-    const result = await handleMarkAddressed(api, { thread_id: 'thread-1', message: 'Fixed' });
+    const result = await handleMarkAddressed(api, { thread_id: 'thread-1', message: 'Fixed, no preview' });
 
-    expect(api.getThread).toHaveBeenCalledTimes(1);
-    expect((api.addressThread as ReturnType<typeof vi.fn>).mock.calls[0][1].preview_url).toBe(preview);
-    expect(result.content[0].text).toContain(`Preview: ${preview}`);
-    // A derived preview is not a link the agent recorded.
-    expect(result.content[0].text).not.toContain('Links recorded');
+    expect((api.addressThread as ReturnType<typeof vi.fn>).mock.calls[0][1].preview_url).toBeNull();
+    expect(api.getThread).not.toHaveBeenCalled();
+    expect(result.content[0].text).not.toContain('Preview:');
+    expect(result.content[0].text).not.toContain('github.io');
   });
 
-  it('derives the preview from the PR the agent hands over, before any PR is on the thread', async () => {
-    const api = makeAddressedApi(addressed(), { repo: 'Acme/site', pr_number: null });
-    await handleMarkAddressed(api, { thread_id: 'thread-1', pr_url: 'https://github.com/Acme/site/pull/7' });
+  it('sends no preview for the PR the agent hands over on an "owner/name" repo either', async () => {
+    const api = makeAddressedApi(addressed({ recorded: { pr_url: 'https://github.com/Acme/site/pull/7', pr_number: 7, pr_branch: null, preview_url: null } }), { repo: 'Acme/site', pr_number: null });
+    const result = await handleMarkAddressed(api, { thread_id: 'thread-1', pr_url: 'https://github.com/Acme/site/pull/7' });
 
-    expect((api.addressThread as ReturnType<typeof vi.fn>).mock.calls[0][1].preview_url).toBe('https://acme.github.io/site/pr-preview/pr-7/');
+    expect((api.addressThread as ReturnType<typeof vi.fn>).mock.calls[0][1].preview_url).toBeNull();
+    expect(api.getThread).not.toHaveBeenCalled();
+    expect(result.content[0].text).not.toContain('github.io');
+  });
+
+  it('forwards the preview the agent gives, unchanged, on an "owner/name" repo', async () => {
+    const preview = 'https://acme.github.io/site/pr-preview/pr-7/';
+    const api = makeAddressedApi(addressed({ recorded: { pr_url: null, pr_number: null, pr_branch: null, preview_url: preview } }), { repo: 'Acme/site', pr_number: 7 });
+    const result = await handleMarkAddressed(api, { thread_id: 'thread-1', message: 'Fixed', preview_url: preview });
+
+    expect((api.addressThread as ReturnType<typeof vi.fn>).mock.calls[0][1].preview_url).toBe(preview);
+    expect(api.getThread).not.toHaveBeenCalled();
+    expect(result.content[0].text).toContain(`Links recorded on the thread: preview ${preview}.`);
   });
 
   it('never derives a github.io preview for a link-only project key', async () => {

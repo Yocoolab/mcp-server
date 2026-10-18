@@ -51,37 +51,33 @@ export async function handleMarkAddressed(
     return handleMarkAddressedLegacy(api, args, emitThreadUpdate);
   }
 
-  // The preview: what the agent tells us, else the pr-preview convention,
-  // which needs the thread's key and PR number — the only reason to read the
-  // thread before reporting.
-  let thread: ThreadDetail | null = null;
-  let previewUrl = cleanUrl(args.preview_url);
-  if (!previewUrl) {
-    thread = await api.getThread(args.thread_id);
-    previewUrl = derivedPreviewUrl(thread, cleanUrl(args.pr_url));
-  }
-
   // One call: the backend moves the stage, records the links it accepts,
   // posts the reply and notifies (POST /threads/:id/addressed). A backend from
   // before that route answers 404 → the step-by-step path below.
+  //
+  // Only the preview the agent gives travels. The brief already said whether
+  // there is one ("Preview: none … leave preview_url out" when the backend
+  // knows Pages publishes the default branch, or the repository deploys
+  // elsewhere); a github.io pr-preview guessed here would be a 404 posted
+  // next to the agent's own "no preview". The step-by-step path keeps the
+  // guess: it only runs against a backend from before the brief.
   if (AGENT_BRIEF) {
     const result = await api.addressThread(args.thread_id, {
       message: args.message,
       pr_url: cleanUrl(args.pr_url),
       pr_branch: cleanUrl(args.pr_branch),
-      preview_url: previewUrl,
+      preview_url: cleanUrl(args.preview_url),
     });
-    if (result) return reportAddressed(args, result, previewUrl, emitThreadUpdate);
+    if (result) return reportAddressed(args, result, emitThreadUpdate);
   }
 
-  return markAddressedStepwise(api, args, thread ?? await api.getThread(args.thread_id), emitThreadUpdate);
+  return markAddressedStepwise(api, args, await api.getThread(args.thread_id), emitThreadUpdate);
 }
 
 /** The tool result (and the extension's live update) for a POST /addressed answer. */
 function reportAddressed(
   args: MarkAddressedArgs,
   result: AddressedResult,
-  previewUrl: string | null,
   emitThreadUpdate?: ThreadUpdateEmitter
 ) {
   const recorded = result.recorded || { pr_url: null, pr_number: null, pr_branch: null, preview_url: null };
@@ -118,7 +114,6 @@ function reportAddressed(
           links.length ? `Links recorded on the thread: ${links.join(', ')}.` : '',
           refused.length ? `Not recorded: ${refused.join(', ')}. The thread still moved to In Review and the reply went out; put the right link in a follow-up message if it matters.` : '',
           posted ? `Message added: "${posted}"` : '',
-          previewUrl && !explicitPreview && recorded.preview_url ? `Preview: ${recorded.preview_url}` : '',
         ].filter(Boolean).join(' '),
       },
     ],
