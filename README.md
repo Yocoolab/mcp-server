@@ -109,6 +109,8 @@ For full tool descriptions and parameters, your MCP client will list them after 
 
 **`Port 9800 is already in use`** — another instance of the MCP server is running, or another app has the port. Set `YOCOOLAB_BRIDGE_PORT` to a different value (e.g. `9801`) in your `.mcp.json`.
 
+**`421 Misdirected request` from the bridge** — the bridge answers only to `127.0.0.1`, `localhost` or `[::1]` in the `Host` header (a guard against DNS rebinding). Call it as `http://127.0.0.1:9800`, not through another hostname. A `403 Forbidden origin` means the request came from a browser (a page or an extension) to a route only local tools may use.
+
 **Verbose diagnostic logs** — set `DEBUG=yocoolab:*` in your env block. All diagnostic output goes to stderr (so it doesn't interfere with the MCP stdio protocol on stdout).
 
 **PR creation says "GitHub token not configured"** — the `create_pr_for_thread` tool needs a GitHub token. Two ways to fix:
