@@ -313,10 +313,15 @@ describe('HTTP Bridge', () => {
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
   });
 
-  it.each(PRIVATE_READS)('GET %s carries no Access-Control-Allow-Origin for the extension', async (path) => {
+  // The extension never calls these; any other installed extension could.
+  it.each(PRIVATE_READS)('GET %s from a browser extension is refused with no CORS headers', async (path) => {
+    await request(port, 'POST', '/event', validPayload({ correlationId: 'private-sel' }));
+    await request(port, 'POST', '/companion/message', JSON.stringify({ content: 'keep me' }));
     const res = await request(port, 'GET', path, undefined, { Origin: EXT_ORIGIN });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
     expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    expect(res.body).not.toContain('private-sel');
+    expect(res.body).not.toContain('keep me');
   });
 
   it.each(PRIVATE_READS)('GET %s from a web page is refused with no CORS headers', async (path) => {
@@ -428,6 +433,84 @@ describe('HTTP Bridge', () => {
     expect(page.headers['access-control-allow-origin']).toBeUndefined();
   });
 
+  // ─── Every browser caller is refused on the local routes ─────────
+  // Only POST /event and GET /thread-updates need the extension; nothing in a
+  // browser — page or extension — has any business on the rest.
+
+  it('POST /companion/message from a browser extension is refused, even as a text/plain simple request', async () => {
+    const seen: string[] = [];
+    bridge.onCompanionMessage((m) => seen.push(m.content));
+    execFileMock.mockClear();
+    const res = await request(port, 'POST', '/companion/message', JSON.stringify({ content: 'run rm -rf ~' }), {
+      Origin: EXT_ORIGIN, 'Content-Type': 'text/plain',
+    });
+    expect(res.status).toBe(403);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    expect(seen).toEqual([]);
+    expect(osascriptRuns()).toEqual([]);
+    expect(JSON.parse((await request(port, 'GET', '/companion/messages')).body).messages).toEqual([]);
+  });
+
+  it('the same companion message with no Origin (a local process) is still accepted', async () => {
+    const res = await request(port, 'POST', '/companion/message', JSON.stringify({ content: 'from Hermes' }), { 'Content-Type': 'text/plain' });
+    expect(res.status).toBe(200);
+    expect(JSON.parse((await request(port, 'GET', '/companion/messages')).body).messages.map((m: { content: string }) => m.content)).toEqual(['from Hermes']);
+  });
+
+  it('POST /companion/reply, /agents/register and DELETE /agents/:id from a browser extension are refused', async () => {
+    const reply = await request(port, 'POST', '/companion/reply', JSON.stringify({ content: 'fake reply' }), { Origin: EXT_ORIGIN, 'Content-Type': 'text/plain' });
+    expect(reply.status).toBe(403);
+    expect(JSON.parse((await request(port, 'GET', '/companion/poll-reply')).body).replies).toEqual([]);
+
+    const reg = await request(port, 'POST', '/agents/register', JSON.stringify({ id: 'phantom-agent', name: 'Phantom' }), { Origin: EXT_ORIGIN, 'Content-Type': 'text/plain' });
+    expect(reg.status).toBe(403);
+    expect(JSON.parse((await request(port, 'GET', '/agents')).body).agents.some((a: { id: string }) => a.id === 'phantom-agent')).toBe(false);
+
+    await request(port, 'POST', '/agents/register', JSON.stringify({ id: 'real-agent', name: 'Real' }));
+    const del = await request(port, 'DELETE', '/agents/real-agent', undefined, { Origin: EXT_ORIGIN });
+    expect(del.status).toBe(403);
+    expect(JSON.parse((await request(port, 'GET', '/agents')).body).agents.some((a: { id: string }) => a.id === 'real-agent')).toBe(true);
+    await request(port, 'DELETE', '/agents/real-agent');
+  });
+
+  // An extension holding a host permission for 127.0.0.1 sends its GETs with
+  // no Origin and `Sec-Fetch-Site: none` (checked in Chromium). So does an
+  // address typed into the browser. Neither is a local process.
+  it('a browser-started request with no Origin (Sec-Fetch-Site: none) cannot read or drain the local routes', async () => {
+    await request(port, 'POST', '/companion/message', JSON.stringify({ content: 'keep me' }));
+    for (const path of PRIVATE_READS) {
+      const res = await request(port, 'GET', path, undefined, { 'Sec-Fetch-Site': 'none', 'Sec-Fetch-Mode': 'cors' });
+      expect(res.status, path).toBe(403);
+    }
+    const local = await request(port, 'GET', '/companion/messages');
+    expect(JSON.parse(local.body).messages.map((m: { content: string }) => m.content)).toEqual(['keep me']);
+  });
+
+  it('the extension holding a host permission still gets /thread-updates and POST /event', async () => {
+    const sse = await openThreadUpdates(port, { 'Sec-Fetch-Site': 'none', 'Sec-Fetch-Mode': 'cors' });
+    expect(sse.status).toBe(200);
+    // No Origin to echo, and none needed: a host permission skips CORS.
+    expect(sse.headers['access-control-allow-origin']).toBeUndefined();
+    // Its POSTs carry the extension Origin (and Sec-Fetch-Site: none).
+    const post = await request(port, 'POST', '/event', validPayload({ correlationId: 'host-perm' }), { Origin: EXT_ORIGIN, 'Sec-Fetch-Site': 'none' });
+    expect(post.status).toBe(200);
+    expect(store.latest()?.correlationId).toBe('host-perm');
+  });
+
+  it.each(['same-origin', 'same-site', 'cross-site'])('Sec-Fetch-Site: %s with no Origin is a web page', async (site) => {
+    await request(port, 'POST', '/event', validPayload({ correlationId: 'private-sel' }));
+    const res = await request(port, 'GET', '/selections/latest', undefined, { 'Sec-Fetch-Site': site });
+    expect(res.status).toBe(403);
+    expect(res.body).not.toContain('private-sel');
+    const ev = await openThreadUpdates(port, { 'Sec-Fetch-Site': site });
+    expect(ev.status).toBe(403);
+  });
+
+  it('Node fetch (Sec-Fetch-Mode but no Sec-Fetch-Site) is still a local caller', async () => {
+    const res = await request(port, 'GET', '/selections/latest', undefined, { 'Sec-Fetch-Mode': 'cors' });
+    expect(res.status).toBe(200);
+  });
+
   // ─── macOS notifications: text is an argument, never AppleScript ──
 
   it('notificationArgs runs one fixed script and passes title, subtitle and text as its arguments', () => {
@@ -512,6 +595,21 @@ describe('HTTP Bridge', () => {
     });
     expect(res.status).toBe(403);
     expect(events.count()).toBe(0);
+  });
+
+  it('POST /monitor/events from any installed extension is refused: only the hooks post events', async () => {
+    for (const headers of [{ Origin: EXT_ORIGIN }, { 'Sec-Fetch-Site': 'none' }]) {
+      const res = await request(port, 'POST', '/monitor/events', JSON.stringify({ session_id: 'forged', hook_event_name: 'Stop' }), headers);
+      expect(res.status).toBe(403);
+    }
+    expect(events.count()).toBe(0);
+  });
+
+  it.each(MONITOR_READS)('GET %s still serves an extension that holds a host permission (no Origin, Sec-Fetch-Site: none)', async (path) => {
+    await seedMonitor();
+    const res = await request(port, 'GET', path, undefined, { 'Sec-Fetch-Site': 'none' });
+    expect(res.status).toBe(200);
+    expect(res.body).toContain('secret-session');
   });
 
   it('GET /dashboard/ still loads from a link on another site, with no CORS grant', async () => {
