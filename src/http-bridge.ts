@@ -43,6 +43,24 @@ setInterval(() => {
   }
 }, 10_000);
 
+/**
+ * The registry as a caller may see it. GET /agents and /health answer any web
+ * page (the extension's page-world script probes /agents from the site's own
+ * origin), so a browser caller gets only the last folder of an agent's cwd —
+ * all the picker shows to tell two agents apart — never the path with the
+ * person's username and project layout. Local callers get it whole.
+ */
+function agentsFor(caller: 'extension' | 'web' | null): ConnectedAgent[] {
+  const agents = Array.from(agentRegistry.values());
+  if (caller === null) return agents;
+  return agents.map((a) => {
+    if (a.cwd == null) return a;
+    // cwd comes from a register call's JSON: not necessarily a string.
+    const dir = typeof a.cwd === 'string' ? a.cwd.split(/[\\/]/).filter(Boolean).pop() || '' : '';
+    return { ...a, cwd: dir };
+  });
+}
+
 export type ThreadUpdateEmitter = (threadId: string, eventType: string, data: Record<string, unknown>) => void;
 
 export interface CompanionMessage {
@@ -392,7 +410,7 @@ export function startHttpBridge(
           bridge: {
             selections: store.count(),
             sseClients: sseClients.size,
-            agents: Array.from(agentRegistry.values()),
+            agents: agentsFor(caller),
           },
           monitor: {
             events: activityEventStore.count(),
@@ -407,7 +425,7 @@ export function startHttpBridge(
     // Agent registry: list connected agents
     if (req.method === 'GET' && url.pathname === '/agents') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ agents: Array.from(agentRegistry.values()) }));
+      res.end(JSON.stringify({ agents: agentsFor(caller) }));
       return;
     }
 

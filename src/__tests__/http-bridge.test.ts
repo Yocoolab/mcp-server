@@ -559,6 +559,32 @@ describe('HTTP Bridge', () => {
     expect(res.status).toBe(421);
   });
 
+  // ─── /agents and /health never hand a browser an agent's full path ──
+
+  it('GET /agents and /health give a browser caller only the folder name of an agent\'s cwd', async () => {
+    await request(port, 'POST', '/agents/register', JSON.stringify({ id: 'cwd-agent', name: 'Claude Code', type: 'claude-code', cwd: '/Users/someone/projects/acme-site' }));
+    for (const headers of [{ Origin: PAGE_ORIGIN }, { Origin: EXT_ORIGIN }, { 'Sec-Fetch-Site': 'cross-site' }]) {
+      const agents = await request(port, 'GET', '/agents', undefined, headers);
+      expect(agents.body).not.toContain('/Users/someone');
+      expect(JSON.parse(agents.body).agents.find((a: { id: string }) => a.id === 'cwd-agent').cwd).toBe('acme-site');
+      const health = await request(port, 'GET', '/health', undefined, headers);
+      expect(health.body).not.toContain('/Users/someone');
+      expect(JSON.parse(health.body).bridge.agents.find((a: { id: string }) => a.id === 'cwd-agent').cwd).toBe('acme-site');
+    }
+    // A local caller (Hermes, hooks) still gets the whole path.
+    const local = await request(port, 'GET', '/agents');
+    expect(JSON.parse(local.body).agents.find((a: { id: string }) => a.id === 'cwd-agent').cwd).toBe('/Users/someone/projects/acme-site');
+    await request(port, 'DELETE', '/agents/cwd-agent');
+  });
+
+  it('a cwd that is not a string never breaks GET /agents for a page', async () => {
+    await request(port, 'POST', '/agents/register', JSON.stringify({ id: 'odd-agent', name: 'Odd', cwd: { path: '/Users/someone' } }));
+    const res = await request(port, 'GET', '/agents', undefined, { Origin: PAGE_ORIGIN });
+    expect(res.status).toBe(200);
+    expect(res.body).not.toContain('/Users/someone');
+    await request(port, 'DELETE', '/agents/odd-agent');
+  });
+
   // ─── macOS notifications: text is an argument, never AppleScript ──
 
   it('notificationArgs runs one fixed script and passes title, subtitle and text as its arguments', () => {
