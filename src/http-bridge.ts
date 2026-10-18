@@ -160,11 +160,12 @@ export function startHttpBridge(port: number, store: SelectionStore): BridgeResu
     const audience = routeAudience(method, url.pathname);
     const caller = browserCaller(req.headers);
 
-    // A web page reaches only the page-world routes. Withholding CORS headers
-    // is not enough on its own: a text/plain POST goes out without a
-    // preflight, so a page could still fake a selection, queue a companion
-    // message for the agent or register a phantom agent.
-    if (caller === 'web' && audience !== 'page') {
+    // Nothing in a browser — a web page or any installed extension — reaches
+    // the local routes, and a web page reaches only the page-world ones.
+    // Withholding CORS headers is not enough on its own: a text/plain POST
+    // goes out without a preflight, so a caller could still fake a selection,
+    // queue a companion message for the agent or register a phantom agent.
+    if (caller !== null && (audience === 'local' || (audience === 'extension' && caller === 'web'))) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Forbidden origin' }));
       return;
@@ -174,7 +175,9 @@ export function startHttpBridge(port: number, store: SelectionStore): BridgeResu
       res.setHeader('Access-Control-Allow-Origin', '*');
     } else if (audience === 'extension') {
       res.setHeader('Vary', 'Origin');
-      if (caller === 'extension') res.setHeader('Access-Control-Allow-Origin', String(req.headers.origin));
+      // An extension holding a host permission sends no Origin on its GETs
+      // and needs no CORS grant.
+      if (caller === 'extension' && req.headers.origin) res.setHeader('Access-Control-Allow-Origin', String(req.headers.origin));
     }
 
     if (isPreflight) {
@@ -488,11 +491,12 @@ export function startHttpBridge(port: number, store: SelectionStore): BridgeResu
  *   Agent, the /thread-updates EventSource). Without a granted host permission
  *   for 127.0.0.1 — the manifest only has optional ones — its requests are
  *   CORS-checked and carry `Origin: chrome-extension://<id>`. → that origin is
- *   echoed back; a web origin gets nothing.
+ *   echoed back; a web origin gets nothing and is refused.
  * - 'local' (everything else: /selections*, /companion*, /agents/register,
  *   DELETE /agents/:id): agents, hooks and scripts on this machine (Node,
- *   curl) send no Origin and need no CORS headers. → none, and a web page is
- *   refused outright.
+ *   curl) send no Origin and need no CORS headers. → none, and every browser
+ *   caller — web page or extension — is refused outright. The extension never
+ *   calls these; any other installed extension could.
  */
 type RouteAudience = 'page' | 'extension' | 'local';
 
@@ -505,15 +509,25 @@ function routeAudience(method: string, pathname: string): RouteAudience {
 
 const EXTENSION_ORIGIN = /^(chrome-extension|moz-extension|safari-web-extension):\/\/[A-Za-z0-9._-]+$/;
 
-/** 'extension' or 'web' for a browser caller, null for a local process. */
+/**
+ * 'extension' or 'web' for a browser caller, null for a local process.
+ *
+ * Local processes send no Fetch Metadata: curl and Node's http send no
+ * Sec-Fetch-* at all, Node's fetch only Sec-Fetch-Mode. A browser marks every
+ * request to 127.0.0.1 with Sec-Fetch-Site, even when it sends no Origin:
+ * - a no-cors GET from a page (an <img>, a no-cors fetch) → cross-site/same-site;
+ * - a same-origin GET → same-origin;
+ * - an extension holding a host permission for 127.0.0.1 sends its GETs
+ *   (EventSource included) with no Origin and `none` — checked in Chromium —
+ *   and so does an address typed into the browser. Counted as 'extension':
+ *   it may reach the extension routes, never the local ones.
+ */
 function browserCaller(headers: http.IncomingHttpHeaders): 'extension' | 'web' | null {
   const origin = headers.origin;
   if (origin) return EXTENSION_ORIGIN.test(origin) ? 'extension' : 'web';
-  // A no-cors GET (an <img>, a no-cors fetch) carries no Origin, but the
-  // browser still marks where it came from.
   const site = headers['sec-fetch-site'];
-  if (site === 'cross-site' || site === 'same-site') return 'web';
-  return null;
+  if (!site) return null;
+  return site === 'none' ? 'extension' : 'web';
 }
 
 function isValidPayload(data: unknown): boolean {
