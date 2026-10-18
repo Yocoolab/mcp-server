@@ -285,10 +285,11 @@ function startServer(): void {
     server.tool(
       'get_thread_context',
       AGENT_BRIEF
-        ? 'Get the agent brief for a feedback thread: what to change (the ask and any design-panel edits, with authored values when known), which repository it belongs in and how to check you are in it, how to find the element in the source, how to verify the change, and how to report back (mark_thread_addressed). Its screenshots follow as images — the element crop, the full page, attached elements, the sketch and reply images — numbered as the brief lists them. On a backend without the brief it returns the raw thread details instead.'
+        ? 'Get the agent brief for a feedback thread: what to change (the ask and any design-panel edits, with authored values when known), which repository it belongs in and how to check you are in it, how to find the element in the source, how to verify the change, and how to report back (mark_thread_addressed). Its screenshots follow as images — the element crop, the full page, attached elements, the sketch and reply images — numbered as the brief lists them (at most 4 per call; the rest are named). Generated drafts\' HTML is left out unless include_drafts is true. On a backend without the brief it returns the raw thread details instead.'
         : 'Get full details of a feedback thread including all messages, UI element context (selector, coordinates, element tag), view state, and the annotated screenshot. The screenshot is returned as an image so you can visually see the feedback location.',
       {
         thread_id: z.string().describe('The UUID of the thread to fetch'),
+        include_drafts: z.boolean().optional().describe('Also return the HTML of the thread\'s generated drafts (sketch → HTML, variants). Off by default: drafts can run to hundreds of thousands of characters; the brief says when there are any.'),
       },
       withCompanion(async (args) => {
         return handleGetContext(api, args);

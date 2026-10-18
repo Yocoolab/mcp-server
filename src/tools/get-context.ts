@@ -7,22 +7,33 @@ type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'image'; data: string; mimeType: string };
 
-/** The brief names at most nine screenshots; nothing beyond that is sent. */
+/** The brief names at most nine screenshots; nothing beyond that is labelled. */
 const MAX_IMAGES = 9;
 /** The model API refuses an image over 5 MB; one that big is named, not sent. */
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
+// Claude Code refuses or cuts a tool result over its MCP output limit (25k
+// tokens by default), and a polling agent pays for every call. So one call
+// carries at most this much: ~12k tokens of text and four images (the brief
+// lists the element crop and the full page first), 8 MB of them in all.
+// Whatever is left out is named, so the brief's numbers still line up.
+export const MAX_TEXT_CHARS = 48_000;
+export const MAX_IMAGES_SENT = 4;
+export const MAX_TOTAL_IMAGE_BYTES = 8 * 1024 * 1024;
+
 export async function handleGetContext(
   api: YocoolabApiClient,
-  args: { thread_id: string }
+  args: { thread_id: string; include_drafts?: boolean }
 ) {
   if (!AGENT_BRIEF) return buildThreadContext(await api.getThread(args.thread_id));
+  const includeDrafts = args.include_drafts === true;
 
   // The brief is the text; the thread row carries the full-page screenshot,
   // the attached elements' shots and the reply images. Both at once — the row
-  // is also what the fallback needs.
+  // is also what the fallback needs. Generated drafts (up to 200k characters
+  // of HTML) come only when asked for.
   const [briefResult, threadResult] = await Promise.allSettled([
-    api.getThreadBrief(args.thread_id, { images: 'attached' }),
+    api.getThreadBrief(args.thread_id, { images: 'attached', drafts: includeDrafts }),
     api.getThread(args.thread_id),
   ]);
   const brief = briefFrom(briefResult);
@@ -33,9 +44,23 @@ export async function handleGetContext(
 
   const thread = threadResult.status === 'fulfilled' ? threadResult.value : null;
   if (!thread) console.error('[get-context] thread row unavailable; screenshots from it are left out:', (threadResult as PromiseRejectedResult).reason);
-  const content: ContentBlock[] = [{ type: 'text', text: brief.markdown }];
+  let text = brief.markdown;
+  if (!includeDrafts && (brief.draft_count ?? 0) > 0) {
+    text += `\nThe drafts' HTML is left out of this call to keep it small: call get_thread_context with include_drafts: true to read it.\n`;
+  }
+  const content: ContentBlock[] = [{ type: 'text', text: capText(text) }];
   content.push(...(await briefImageBlocks(api, args.thread_id, brief.images, thread)));
   return { content };
+}
+
+/** The text cut to MAX_TEXT_CHARS at a line break, saying how much was left out. */
+function capText(text: string): string {
+  if (text.length <= MAX_TEXT_CHARS) return text;
+  const room = MAX_TEXT_CHARS - 300; // the note below
+  const breakAt = text.lastIndexOf('\n', room);
+  const kept = text.slice(0, breakAt > room / 2 ? breakAt : room);
+  const cut = text.length - kept.length;
+  return `${kept}\n\n[get_thread_context stops its text at ${MAX_TEXT_CHARS.toLocaleString('en-US')} characters: ${cut.toLocaleString('en-US')} more characters left out. Open the thread in Yocoolab for the rest.]\n`;
 }
 
 /**
@@ -70,7 +95,8 @@ async function briefImageBlocks(
 ): Promise<ContentBlock[]> {
   const list = (Array.isArray(images) ? images : []).slice(0, MAX_IMAGES);
   if (!list.length) return [];
-  const wants = (kind: BriefImage['kind']) => list.some((img) => img.kind === kind);
+  const sent = list.slice(0, MAX_IMAGES_SENT);
+  const wants = (kind: BriefImage['kind']) => sent.some((img) => img.kind === kind);
 
   const [stored, sketch] = await Promise.all([
     wants('element')
@@ -99,7 +125,13 @@ async function briefImageBlocks(
   const attached = thread && Array.isArray(thread.attached_elements) ? thread.attached_elements : [];
 
   const blocks: ContentBlock[] = [];
-  for (const img of list) {
+  let budget = MAX_TOTAL_IMAGE_BYTES;
+  for (const [i, img] of list.entries()) {
+    const label = `[${img.n}] ${img.label}`;
+    if (i >= MAX_IMAGES_SENT) {
+      blocks.push({ type: 'text', text: `${label} — not attached (this call sends at most ${MAX_IMAGES_SENT} images; open the thread in Yocoolab to see it)` });
+      continue;
+    }
     let src: string | null | undefined = null;
     if (img.kind === 'element') src = stored.element?.dataUrl;
     else if (img.kind === 'page') src = thread?.screenshot_url;
@@ -108,10 +140,18 @@ async function briefImageBlocks(
     else if (img.kind === 'attachment' && img.message != null) {
       src = withImages[order.indexOf(img.message)]?.attachments?.[img.attachment ?? 0]?.url;
     }
-    const label = `[${img.n}] ${img.label}`;
     const block = imageBlock(src);
-    if (typeof block === 'string') blocks.push({ type: 'text', text: `${label} — not attached (${block})` });
-    else blocks.push({ type: 'text', text: label }, block);
+    if (typeof block === 'string') {
+      blocks.push({ type: 'text', text: `${label} — not attached (${block})` });
+      continue;
+    }
+    const bytes = block.type === 'image' ? Math.floor(block.data.length * 0.75) : 0;
+    if (bytes > budget) {
+      blocks.push({ type: 'text', text: `${label} — not attached (over this call's ${MAX_TOTAL_IMAGE_BYTES / (1024 * 1024)} MB of images; open the thread in Yocoolab to see it)` });
+      continue;
+    }
+    budget -= bytes;
+    blocks.push({ type: 'text', text: label }, block);
   }
   return blocks;
 }

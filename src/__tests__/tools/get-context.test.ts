@@ -205,7 +205,8 @@ describe.skipIf(!AGENT_BRIEF)('handleGetContext with the agent brief', () => {
     const api = makeBriefApi(brief);
     const result = await handleGetContext(api, { thread_id: THREAD_ID });
 
-    expect(api.getThreadBrief).toHaveBeenCalledWith(THREAD_ID, { images: 'attached' });
+    // Drafts (up to 200k characters of HTML) only on request.
+    expect(api.getThreadBrief).toHaveBeenCalledWith(THREAD_ID, { images: 'attached', drafts: false });
     expect(result.content[0]).toEqual({ type: 'text', text: brief.markdown });
     // None of the legacy builder's lines
     const all = texts(result.content as any).join('\n');
@@ -336,6 +337,83 @@ describe.skipIf(!AGENT_BRIEF)('handleGetContext with the agent brief', () => {
   it('a refusal is final: a 403 on the brief is thrown, not papered over with the raw thread', async () => {
     const api = makeBriefApi(new YocoolabApiError('API request failed: 403 Forbidden — {"code":"guest_not_allowed"}', 403));
     await expect(handleGetContext(api, { thread_id: THREAD_ID })).rejects.toThrow('403');
+  });
+
+  // Claude Code refuses or cuts a tool result over its MCP output limit
+  // (25k tokens by default), so the default call stays well under it.
+  describe('output size', () => {
+    it('include_drafts: true asks for the drafts, and adds no pointer to them', async () => {
+      const api = makeBriefApi({ ...makeBrief(), draft_count: 2 });
+      const result = await handleGetContext(api, { thread_id: THREAD_ID, include_drafts: true });
+
+      expect(api.getThreadBrief).toHaveBeenCalledWith(THREAD_ID, { images: 'attached', drafts: true });
+      expect(texts(result.content as any)[0]).not.toContain('include_drafts');
+    });
+
+    it('says how to get the drafts when this call left them out', async () => {
+      const brief = { ...makeBrief(), draft_count: 2 };
+      const result = await handleGetContext(makeBriefApi(brief), { thread_id: THREAD_ID });
+
+      const text = texts(result.content as any)[0]!;
+      expect(text.startsWith(brief.markdown)).toBe(true);
+      expect(text).toContain('get_thread_context with include_drafts: true');
+    });
+
+    it('caps its text, keeping the start of the brief and saying what was cut', async () => {
+      const head = `## Yocoolab thread ${THREAD_ID}\nAsk: Restyle the hero heading.\n\n## Drafts\n`;
+      const markdown = head + '<div class="draft">x</div>\n'.repeat(20_000); // ~540k characters
+      const result = await handleGetContext(makeBriefApi(makeBrief([], markdown)), { thread_id: THREAD_ID, include_drafts: true });
+
+      const text = texts(result.content as any).join('\n');
+      expect(text.length).toBeLessThan(50_000);
+      expect(text.startsWith(head)).toBe(true);
+      expect(text).toMatch(/\d[\d,]* more characters left out/);
+    });
+
+    it('sends at most four images and names the rest, without fetching what it will not send', async () => {
+      const api = makeBriefApi(
+        makeBrief([
+          { n: 1, kind: 'element', label: 'element crop' },
+          { n: 2, kind: 'page', label: 'full page' },
+          { n: 3, kind: 'attached_element', label: 'element 2', element: 2 },
+          { n: 4, kind: 'attached_element', label: 'element 3', element: 3 },
+          { n: 5, kind: 'sketch', label: 'sketch' },
+          { n: 6, kind: 'attachment', label: 'image in message 1', message: 1, attachment: 0 },
+        ]),
+        {
+          screenshot_url: PNG,
+          attached_elements: [{ screenshot: PNG }, { screenshot: PNG }],
+          messages: [{ id: 'm1', thread_id: THREAD_ID, content: 'x', created_at: '', author_name: 'A', author_email: '', attachments: [{ url: PNG }] }],
+        },
+      );
+      const result = await handleGetContext(api, { thread_id: THREAD_ID });
+
+      expect(result.content.filter((c) => c.type === 'image')).toHaveLength(4);
+      expect(api.getThreadSketch).not.toHaveBeenCalled();
+      const names = texts(result.content as any);
+      expect(names).toContain('[5] sketch — not attached (this call sends at most 4 images; open the thread in Yocoolab to see it)');
+      expect(names).toContain('[6] image in message 1 — not attached (this call sends at most 4 images; open the thread in Yocoolab to see it)');
+    });
+
+    it('keeps the images it sends under one total size, naming the one that would go over', async () => {
+      const big = `data:image/png;base64,${'A'.repeat(Math.ceil((4.5 * 1024 * 1024) / 0.75))}`; // 4.5 MB each
+      const api = makeBriefApi(
+        makeBrief([
+          { n: 1, kind: 'page', label: 'full page' },
+          { n: 2, kind: 'attached_element', label: 'element 2', element: 2 },
+          { n: 3, kind: 'attached_element', label: 'element 3', element: 3 },
+        ]),
+        { screenshot_url: big, attached_elements: [{ screenshot: big }, { screenshot: PNG }] },
+      );
+      const result = await handleGetContext(api, { thread_id: THREAD_ID });
+
+      const shapes = result.content.slice(1).map((c) => (c.type === 'image' ? 'image' : (c as { text: string }).text));
+      expect(shapes).toEqual([
+        '[1] full page', 'image',
+        '[2] element 2 — not attached (over this call\'s 8 MB of images; open the thread in Yocoolab to see it)',
+        '[3] element 3', 'image',
+      ]);
+    });
   });
 
   it('throws the thread error when neither the brief nor the thread can be had', async () => {
