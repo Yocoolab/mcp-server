@@ -511,6 +511,54 @@ describe('HTTP Bridge', () => {
     expect(res.status).toBe(200);
   });
 
+  // ─── Host: only loopback names (DNS rebinding) ──────────────────
+  // A page whose name rebinds to 127.0.0.1 makes same-origin requests: no
+  // Origin, and — the page is not a secure context — no Sec-Fetch-* either.
+  // Only the Host header still carries the page's own name.
+  const REBIND = 'rebind.attacker.example';
+
+  it.each(PRIVATE_READS)('GET %s with a non-loopback Host is refused with 421', async (path) => {
+    await request(port, 'POST', '/event', validPayload({ correlationId: 'private-sel' }));
+    const res = await request(port, 'GET', path, undefined, { Host: `${REBIND}:${port}` });
+    expect(res.status).toBe(421);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    expect(res.body).not.toContain('private-sel');
+  });
+
+  it('a rebinding page cannot drain the companion queue', async () => {
+    await request(port, 'POST', '/companion/message', JSON.stringify({ content: 'keep me' }));
+    const res = await request(port, 'GET', '/companion/messages', undefined, { Host: `${REBIND}:${port}`, 'Sec-Fetch-Site': 'same-origin' });
+    expect(res.status).toBe(421);
+    const local = await request(port, 'GET', '/companion/messages', undefined, { Host: `127.0.0.1:${port}` });
+    expect(JSON.parse(local.body).messages.map((m: { content: string }) => m.content)).toEqual(['keep me']);
+  });
+
+  it('every route checks Host, the page-world and extension ones too', async () => {
+    expect((await request(port, 'GET', '/agents', undefined, { Host: `${REBIND}:${port}` })).status).toBe(421);
+    expect((await request(port, 'GET', '/health', undefined, { Host: REBIND })).status).toBe(421);
+    const ev = await request(port, 'POST', '/event', validPayload(), { Host: `${REBIND}:${port}`, Origin: `http://${REBIND}:${port}` });
+    expect(ev.status).toBe(421);
+    expect(store.count()).toBe(0);
+    expect((await request(port, 'OPTIONS', '/event', undefined, { Host: REBIND, Origin: EXT_ORIGIN, 'Access-Control-Request-Method': 'POST' })).status).toBe(421);
+  });
+
+  it.each(['127.0.0.1', 'localhost', 'LocalHost', '[::1]'])('Host %s (with or without the port) is served', async (name) => {
+    expect((await request(port, 'GET', '/health', undefined, { Host: `${name}:${port}` })).status).toBe(200);
+    expect((await request(port, 'GET', '/health', undefined, { Host: name })).status).toBe(200);
+  });
+
+  it.each([
+    'localhost.rebind.attacker.example',
+    '127.0.0.1.nip.io',
+    '[::1].attacker.example',
+    '127.0.0.2',
+    '0.0.0.0',
+    'localhost.',
+  ])('Host %s is refused', async (name) => {
+    const res = await request(port, 'GET', '/health', undefined, { Host: `${name}:${port}` });
+    expect(res.status).toBe(421);
+  });
+
   // ─── macOS notifications: text is an argument, never AppleScript ──
 
   it('notificationArgs runs one fixed script and passes title, subtitle and text as its arguments', () => {
@@ -595,6 +643,14 @@ describe('HTTP Bridge', () => {
     });
     expect(res.status).toBe(403);
     expect(events.count()).toBe(0);
+  });
+
+  it.each(MONITOR_READS)('GET %s with a non-loopback Host (DNS rebinding) is refused with 421', async (path) => {
+    await seedMonitor();
+    const res = await request(port, 'GET', path, undefined, { Host: `${REBIND}:${port}` });
+    expect(res.status).toBe(421);
+    expect(res.body).not.toContain('secret-session');
+    expect(res.body).not.toContain('my private prompt');
   });
 
   it('POST /monitor/events from any installed extension is refused: only the hooks post events', async () => {

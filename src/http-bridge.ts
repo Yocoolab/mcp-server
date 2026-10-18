@@ -212,6 +212,16 @@ export function startHttpBridge(
   const server = http.createServer((req, res) => {
     const url = new URL(req.url || '/', `http://localhost:${port}`);
 
+    // DNS rebinding: a page whose name now resolves to 127.0.0.1 reaches this
+    // port with same-origin requests — no Origin and, outside a secure
+    // context, no Sec-Fetch-* either — but its Host still names the page.
+    // Every real caller uses a loopback name.
+    if (!isLoopbackHost(req.headers.host)) {
+      res.writeHead(421, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Misdirected request: the bridge answers only to 127.0.0.1, localhost or [::1]' }));
+      return;
+    }
+
     // CORS is decided per route (see routeAudience). A preflight is judged by
     // the method it asks for.
     const isPreflight = req.method === 'OPTIONS';
@@ -635,6 +645,13 @@ function routeAudience(method: string, pathname: string): RouteAudience {
 }
 
 const EXTENSION_ORIGIN = /^(chrome-extension|moz-extension|safari-web-extension):\/\/[A-Za-z0-9._-]+$/;
+
+const LOOPBACK_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})?$/i;
+
+/** A Host header naming this machine's loopback (any port). */
+export function isLoopbackHost(host: string | undefined): boolean {
+  return LOOPBACK_HOST.test(String(host || '').trim());
+}
 
 /**
  * 'extension' or 'web' for a browser caller, null for a local process.
