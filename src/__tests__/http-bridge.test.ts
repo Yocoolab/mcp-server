@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
 import { SelectionStore } from '../selection-store.js';
-import { startHttpBridge } from '../http-bridge.js';
+import { SessionManager } from '../session-manager.js';
+import { startHttpBridge, type BridgeResult } from '../http-bridge.js';
+import type { ActivityEventStore } from '../event-store.js';
+import type { ActivityEvent } from '../activity-types.js';
 
 // Mock child_process.execFile to prevent macOS notifications during tests
 vi.mock('node:child_process', () => ({
@@ -42,24 +45,37 @@ function validPayload(overrides: Record<string, unknown> = {}) {
   });
 }
 
-// FIXME(v1.1.0): startHttpBridge() return shape changed — it no longer returns a raw http.Server.
-// Tests fail with "server.on is not a function" / "server.close is not a function". The bridge now
-// returns an object with helper functions (emitThreadUpdate, getCompanionMessages, postCompanionReply)
-// rather than the underlying server. To re-enable: refactor tests to use a fresh port + supertest-style
-// HTTP requests instead of binding directly to the returned server. Tracking: TODO-issue.
-describe.skip('HTTP Bridge', () => {
+/**
+ * The activity store without its disk side: the real one appends every event
+ * to ~/.yocoolab-mcp/events.jsonl, which a test must never touch.
+ */
+function memoryEventStore(): ActivityEventStore {
+  const events: ActivityEvent[] = [];
+  return {
+    push: (e: ActivityEvent) => { events.push(e); },
+    recent: (limit = 200) => events.slice(Math.max(0, events.length - limit)),
+    count: () => events.length,
+    loadFromDisk: () => {},
+    close: () => {},
+  } as unknown as ActivityEventStore;
+}
+
+describe('HTTP Bridge', () => {
+  let bridge: BridgeResult;
   let server: http.Server;
   let store: SelectionStore;
+  let events: ActivityEventStore;
   let port: number;
 
   beforeEach(async () => {
     store = new SelectionStore();
-    // Use port 0 to get a random available port
-    server = startHttpBridge(0, store);
+    events = memoryEventStore();
+    // Port 0 → random free port; startHttpBridge calls listen() synchronously
+    bridge = startHttpBridge(0, store, events, new SessionManager());
+    server = bridge.server;
     await new Promise<void>((resolve) => {
-      server.on('listening', () => {
-        const addr = server.address() as { port: number };
-        port = addr.port;
+      server.once('listening', () => {
+        port = (server.address() as { port: number }).port;
         resolve();
       });
     });
@@ -69,13 +85,15 @@ describe.skip('HTTP Bridge', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  it('GET /health returns status ok with selection count', async () => {
+  it('GET /health returns status ok with bridge and monitor stats', async () => {
     const res = await request(port, 'GET', '/health');
     expect(res.status).toBe(200);
     const json = JSON.parse(res.body);
     expect(json.status).toBe('ok');
-    expect(json.selections).toBe(0);
-    expect(json.clients).toBe(1);
+    expect(json.bridge.selections).toBe(0);
+    expect(json.bridge.sseClients).toBe(0);
+    expect(Array.isArray(json.bridge.agents)).toBe(true);
+    expect(json.monitor).toEqual({ events: 0, sessions: 0 });
   });
 
   it('POST /event with valid payload returns 200 and correlationId', async () => {
@@ -184,9 +202,35 @@ describe.skip('HTTP Bridge', () => {
   it('GET /health reflects selection count after POST', async () => {
     await request(port, 'POST', '/event', validPayload());
     await request(port, 'POST', '/event', validPayload());
-
     const res = await request(port, 'GET', '/health');
+    expect(JSON.parse(res.body).bridge.selections).toBe(2);
+  });
+
+  it('agent registry: register then list', async () => {
+    const reg = await request(port, 'POST', '/agents/register', JSON.stringify({ id: 'test-agent', name: 'Test', type: 'custom' }));
+    expect(reg.status).toBe(200);
+    const list = await request(port, 'GET', '/agents');
+    expect(list.status).toBe(200);
+    expect(JSON.parse(list.body).agents.some((a: { id: string }) => a.id === 'test-agent')).toBe(true);
+    await request(port, 'DELETE', '/agents/test-agent');
+  });
+
+  it('companion: POST /companion/message is readable via GET /companion/messages', async () => {
+    const post = await request(port, 'POST', '/companion/message', JSON.stringify({ content: 'hello agent' }));
+    expect(post.status).toBe(200);
+    const res = await request(port, 'GET', '/companion/messages');
     const json = JSON.parse(res.body);
-    expect(json.selections).toBe(2);
+    expect(json.messages).toHaveLength(1);
+    expect(json.messages[0].content).toBe('hello agent');
+  });
+
+  it('activity monitor: a hook event posted to /monitor/events is served by /monitor/api/*', async () => {
+    const post = await request(port, 'POST', '/monitor/events', JSON.stringify({ session_id: 's1', hook_event_name: 'Stop', cwd: '/tmp/repo' }));
+    expect(post.status).toBe(200);
+    expect(events.count()).toBe(1);
+    const recent = JSON.parse((await request(port, 'GET', '/monitor/api/events/recent')).body);
+    expect(recent[0].session_id).toBe('s1');
+    const sessions = JSON.parse((await request(port, 'GET', '/monitor/api/sessions')).body);
+    expect(sessions[0].session_id).toBe('s1');
   });
 });
