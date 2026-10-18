@@ -1,9 +1,11 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type http from 'node:http';
+import type { Duplex } from 'node:stream';
 import type { ActivityEvent, SessionSummary, WSMessage } from './activity-types.js';
 import type { ActivityEventStore } from './event-store.js';
 import type { SessionManager } from './session-manager.js';
 import { WS_HEARTBEAT_INTERVAL, SNAPSHOT_SIZE } from './activity-constants.js';
+import { browserCaller, isLoopbackHost } from './http-bridge.js';
 
 export interface ActivityWsResult {
   broadcast: (event: ActivityEvent) => void;
@@ -21,13 +23,27 @@ export function attachActivityWs(
 
   server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url || '/', 'http://localhost');
-    if (url.pathname === '/ws/activity') {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request);
-      });
-    } else {
+    if (url.pathname !== '/ws/activity') {
       socket.destroy();
+      return;
     }
+    // The stream carries every prompt, tool input and tool output the hooks
+    // report, and a WebSocket is not subject to CORS: the handshake itself
+    // must refuse what the HTTP routes refuse. A rebinding page still names
+    // itself in Host; a web page always sends its Origin on a handshake.
+    // Local clients (no Origin) and the extension's background worker
+    // (chrome-extension://…, builds before 1.9.202) may connect.
+    if (!isLoopbackHost(request.headers.host)) {
+      refuseUpgrade(socket, 421, 'Misdirected Request');
+      return;
+    }
+    if (browserCaller(request.headers) === 'web') {
+      refuseUpgrade(socket, 403, 'Forbidden');
+      return;
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
   });
 
   wss.on('connection', (ws) => {
@@ -106,4 +122,11 @@ export function attachActivityWs(
   }
 
   return { broadcast, broadcastSessionUpdate, clientCount };
+}
+
+/** Answer a WebSocket handshake with a plain HTTP error and hang up. */
+function refuseUpgrade(socket: Duplex, status: number, reason: string): void {
+  // end(), not write() + destroy(): the status line must reach the client.
+  socket.once('finish', () => socket.destroy());
+  socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
 }

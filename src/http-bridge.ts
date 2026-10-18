@@ -666,7 +666,7 @@ export function isLoopbackHost(host: string | undefined): boolean {
  *   and so does an address typed into the browser. Counted as 'extension':
  *   it may reach the extension routes, never the local ones.
  */
-function browserCaller(headers: http.IncomingHttpHeaders): 'extension' | 'web' | null {
+export function browserCaller(headers: http.IncomingHttpHeaders): 'extension' | 'web' | null {
   const origin = headers.origin;
   if (origin) return EXTENSION_ORIGIN.test(origin) ? 'extension' : 'web';
   const site = headers['sec-fetch-site'];
