@@ -95,19 +95,37 @@ function checkProcess(name: string): boolean {
   }
 }
 
+/**
+ * The package spec every config runs: this package at its own major, read
+ * from the package.json that ships with it (dist/commands/ → ../../), so the
+ * 3.x setup writes @3 and a 2.x one @2. A hardcoded major drifts: 3.0.0's
+ * setup still wrote @2 and sent every install back to 2.5.0. Without a
+ * readable package.json the spec is left unpinned (latest).
+ */
+export function packageSpec(): string {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf-8')) as { name?: string; version?: string };
+    const name = pkg.name || '@yocoolab/mcp-server';
+    const major = /^(\d+)\./.exec(pkg.version || '')?.[1];
+    return major ? `${name}@${major}` : name;
+  } catch {
+    return '@yocoolab/mcp-server';
+  }
+}
+
 interface SetupTokens {
   yocoolabToken?: string;
   githubToken?: string;
 }
 
-function buildMcpConfig(
+export function buildMcpConfig(
   agentName: string,
   agentType: string,
   tokens: SetupTokens = {}
 ): Record<string, unknown> {
   return {
     command: 'npx',
-    args: ['-y', '@yocoolab/mcp-server@2'],
+    args: ['-y', packageSpec()],
     env: {
       YOCOOLAB_API_URL: 'https://app.yocoolab.com',
       YOCOOLAB_TOKEN: tokens.yocoolabToken || '<your token — get from Chrome extension settings>',
@@ -140,7 +158,7 @@ function parseTokenFlags(argv: readonly string[]): SetupTokens {
   return tokens;
 }
 
-function writeConfig(
+export function writeConfig(
   configPath: string,
   agentName: string,
   agentType: string,
