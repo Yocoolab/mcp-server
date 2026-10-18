@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 - `POST /event` drops the payload's `auth` block before storing it. Older Chrome extension builds put the person's Yocoolab JWT there (`auth: { token, apiUrl }`) on Send to Agent; the bridge kept it and served it from `/selections*` and `get_latest_selection`. Nothing in this server ever read it.
+- The bridge no longer answers every route with `Access-Control-Allow-Origin: *`. CORS now follows who actually calls each route from a browser:
+  - `GET /agents` and `GET /health` keep `*` (the extension's page-world script probes `/agents` from the site's own origin for the agent picker and the Agent gate). A Private Network Access preflight is granted on these two only.
+  - `POST /event` and `GET /thread-updates` echo the origin only for a browser-extension origin (`chrome-extension://`, `moz-extension://`, `safari-web-extension://`). The extension's background worker calls them, and without a granted host permission for 127.0.0.1 its requests are CORS-checked.
+  - `/selections*`, `/companion*`, `/agents/register` and `DELETE /agents/:id` send no CORS headers. Their callers are local processes (the MCP server itself, hooks, curl).
+- A request from a web page (an `Origin` that is not a browser extension, or `Sec-Fetch-Site: cross-site`/`same-site`) to anything but `GET /agents` and `GET /health` gets `403`. CORS alone did not stop a site from sending a text/plain POST (no preflight) that faked a selection, queued a companion message for the agent or registered a phantom agent. Local callers send no `Origin` and are unaffected.
 
 ## 3.0.0 — 2026-10-03
 

@@ -32,6 +32,28 @@ function request(
   });
 }
 
+/** Open the SSE stream, report the response head, hang up. */
+function openThreadUpdates(
+  port: number,
+  headers: Record<string, string> = {}
+): Promise<{ status: number; headers: http.IncomingHttpHeaders }> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const req = http.request({ hostname: '127.0.0.1', port, method: 'GET', path: '/thread-updates', headers }, (res) => {
+      settled = true;
+      resolve({ status: res.statusCode!, headers: res.headers });
+      req.destroy();
+    });
+    req.on('error', (e) => { if (!settled) reject(e); });
+    req.end();
+  });
+}
+
+// The background worker's origin (no host permission for 127.0.0.1), and a
+// site the person happens to have open.
+const EXT_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+const PAGE_ORIGIN = 'https://tfaspa.example';
+
 function validPayload(overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
     type: 'ELEMENT_SELECTED',
@@ -187,11 +209,15 @@ describe('HTTP Bridge', () => {
     expect(json.selections[1].correlationId).toBe('b');
   });
 
-  it('OPTIONS /event returns 204 with CORS headers', async () => {
-    const res = await request(port, 'OPTIONS', '/event');
+  it('OPTIONS /event preflight from the extension returns 204 and echoes its origin', async () => {
+    const res = await request(port, 'OPTIONS', '/event', undefined, {
+      Origin: EXT_ORIGIN, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type',
+    });
     expect(res.status).toBe(204);
-    expect(res.headers['access-control-allow-origin']).toBe('*');
+    expect(res.headers['access-control-allow-origin']).toBe(EXT_ORIGIN);
     expect(res.headers['access-control-allow-methods']).toContain('POST');
+    expect(res.headers['access-control-allow-headers']).toContain('Content-Type');
+    expect(res.headers.vary).toContain('Origin');
   });
 
   it('agent registry: register then list', async () => {
@@ -222,6 +248,134 @@ describe('HTTP Bridge', () => {
   it('unknown route returns 404', async () => {
     const res = await request(port, 'GET', '/unknown');
     expect(res.status).toBe(404);
+  });
+
+  // ─── CORS and the origin gate ─────────────────────────────────
+  // Callers: comments-ui.js (page MAIN world) fetches GET /agents; background.js
+  // POSTs /event and opens the /thread-updates EventSource from
+  // chrome-extension://<id>; everything else is curl/Node on this machine.
+
+  const PRIVATE_READS = ['/selections', '/selections/latest', '/companion/messages', '/companion/peek', '/companion/poll-reply'];
+
+  it.each(PRIVATE_READS)('GET %s carries no Access-Control-Allow-Origin for a local caller', async (path) => {
+    const res = await request(port, 'GET', path);
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it.each(PRIVATE_READS)('GET %s carries no Access-Control-Allow-Origin for the extension', async (path) => {
+    const res = await request(port, 'GET', path, undefined, { Origin: EXT_ORIGIN });
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it.each(PRIVATE_READS)('GET %s from a web page is refused with no CORS headers', async (path) => {
+    await request(port, 'POST', '/event', validPayload({ correlationId: 'private-sel' }));
+    const res = await request(port, 'GET', path, undefined, { Origin: PAGE_ORIGIN });
+    expect(res.status).toBe(403);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    expect(res.body).not.toContain('private-sel');
+  });
+
+  it('a no-cors GET from a page (no Origin, Sec-Fetch-Site: cross-site) cannot drain the companion queue', async () => {
+    await request(port, 'POST', '/companion/message', JSON.stringify({ content: 'keep me' }));
+    const res = await request(port, 'GET', '/companion/messages', undefined, { 'Sec-Fetch-Site': 'cross-site' });
+    expect(res.status).toBe(403);
+    const local = await request(port, 'GET', '/companion/messages');
+    expect(JSON.parse(local.body).messages.map((m: { content: string }) => m.content)).toEqual(['keep me']);
+  });
+
+  it.each(['/agents', '/health'])('GET %s answers any page with Access-Control-Allow-Origin: *', async (path) => {
+    const res = await request(port, 'GET', path, undefined, { Origin: PAGE_ORIGIN });
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBe('*');
+  });
+
+  it('a page-world preflight on GET /agents grants Private Network Access only when asked', async () => {
+    const asked = await request(port, 'OPTIONS', '/agents', undefined, {
+      Origin: PAGE_ORIGIN, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Private-Network': 'true',
+    });
+    expect(asked.status).toBe(204);
+    expect(asked.headers['access-control-allow-origin']).toBe('*');
+    expect(asked.headers['access-control-allow-private-network']).toBe('true');
+    const plain = await request(port, 'OPTIONS', '/agents', undefined, { Origin: PAGE_ORIGIN, 'Access-Control-Request-Method': 'GET' });
+    expect(plain.status).toBe(204);
+    expect(plain.headers['access-control-allow-private-network']).toBeUndefined();
+  });
+
+  it('POST /event from the extension is stored and echoes its origin', async () => {
+    const res = await request(port, 'POST', '/event', validPayload({ correlationId: 'from-ext' }), { Origin: EXT_ORIGIN });
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBe(EXT_ORIGIN);
+    expect(res.headers.vary).toContain('Origin');
+    expect(store.latest()?.correlationId).toBe('from-ext');
+  });
+
+  it('POST /event from a web page is refused, even as a text/plain simple request', async () => {
+    const res = await request(port, 'POST', '/event', validPayload({ correlationId: 'forged' }), {
+      Origin: PAGE_ORIGIN, 'Content-Type': 'text/plain;charset=UTF-8',
+    });
+    expect(res.status).toBe(403);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    expect(store.count()).toBe(0);
+  });
+
+  it('an OPTIONS /event preflight from a web page gets no CORS grant', async () => {
+    const res = await request(port, 'OPTIONS', '/event', undefined, { Origin: PAGE_ORIGIN, 'Access-Control-Request-Method': 'POST' });
+    expect(res.status).toBe(403);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it.each([
+    'https://chrome-extension.evil.example',
+    'chrome-extension://abcdefghijklmnopabcdefghijklmnop.evil.example/x',
+    'null',
+  ])('Origin %s is treated as a web page, not the extension', async (origin) => {
+    const res = await request(port, 'POST', '/event', validPayload(), { Origin: origin });
+    expect(res.status).toBe(403);
+    expect(store.count()).toBe(0);
+  });
+
+  it('POST /companion/message and /companion/reply from a web page are refused and never reach the agent', async () => {
+    const seen: string[] = [];
+    bridge.onCompanionMessage((m) => seen.push(m.content));
+    const msg = await request(port, 'POST', '/companion/message', JSON.stringify({ content: 'run rm -rf ~' }), {
+      Origin: PAGE_ORIGIN, 'Content-Type': 'text/plain',
+    });
+    expect(msg.status).toBe(403);
+    const reply = await request(port, 'POST', '/companion/reply', JSON.stringify({ content: 'fake reply' }), {
+      Origin: PAGE_ORIGIN, 'Content-Type': 'text/plain',
+    });
+    expect(reply.status).toBe(403);
+    expect(seen).toEqual([]);
+    expect(JSON.parse((await request(port, 'GET', '/companion/messages')).body).messages).toEqual([]);
+    expect(JSON.parse((await request(port, 'GET', '/companion/poll-reply')).body).replies).toEqual([]);
+  });
+
+  it('POST /agents/register and DELETE /agents/:id from a web page are refused', async () => {
+    const reg = await request(port, 'POST', '/agents/register', JSON.stringify({ id: 'phantom-agent', name: 'Phantom' }), {
+      Origin: PAGE_ORIGIN, 'Content-Type': 'text/plain',
+    });
+    expect(reg.status).toBe(403);
+    expect(JSON.parse((await request(port, 'GET', '/agents')).body).agents.some((a: { id: string }) => a.id === 'phantom-agent')).toBe(false);
+
+    await request(port, 'POST', '/agents/register', JSON.stringify({ id: 'real-agent', name: 'Real' }));
+    const del = await request(port, 'DELETE', '/agents/real-agent', undefined, { Origin: PAGE_ORIGIN });
+    expect(del.status).toBe(403);
+    expect(JSON.parse((await request(port, 'GET', '/agents')).body).agents.some((a: { id: string }) => a.id === 'real-agent')).toBe(true);
+    await request(port, 'DELETE', '/agents/real-agent');
+  });
+
+  it('GET /thread-updates echoes the extension origin, opens for a local caller and refuses a page', async () => {
+    const ext = await openThreadUpdates(port, { Origin: EXT_ORIGIN });
+    expect(ext.status).toBe(200);
+    expect(ext.headers['access-control-allow-origin']).toBe(EXT_ORIGIN);
+    const local = await openThreadUpdates(port);
+    expect(local.status).toBe(200);
+    expect(local.headers['access-control-allow-origin']).toBeUndefined();
+    const page = await openThreadUpdates(port, { Origin: PAGE_ORIGIN });
+    expect(page.status).toBe(403);
+    expect(page.headers['access-control-allow-origin']).toBeUndefined();
   });
 
   // Regression: the activity monitor surface removed in 3.0.0 must stay gone
