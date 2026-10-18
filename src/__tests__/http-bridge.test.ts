@@ -17,11 +17,12 @@ function request(
   port: number,
   method: string,
   path: string,
-  body?: string
+  body?: string,
+  headers: Record<string, string> = {}
 ): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
   return new Promise((resolve, reject) => {
     const req = http.request(
-      { hostname: '127.0.0.1', port, method, path, headers: { 'Content-Type': 'application/json' } },
+      { hostname: '127.0.0.1', port, method, path, headers: { 'Content-Type': 'application/json', ...headers } },
       (res) => {
         let data = '';
         res.on('data', (chunk) => (data += chunk));
@@ -155,6 +156,26 @@ describe('HTTP Bridge', () => {
     const latest = store.latest()!;
     expect(latest.timestamp).toBeDefined();
     expect(typeof latest.timestamp).toBe('number');
+  });
+
+  // Older extension builds put the person's Yocoolab JWT into the Send-to-Agent
+  // payload. The store feeds /selections* and get_latest_selection (which prints
+  // the payload whole into the agent's transcript), so it must never hold it.
+  it('POST /event never stores or serves the payload\'s auth block', async () => {
+    const res = await request(port, 'POST', '/event', validPayload({
+      correlationId: 'with-auth',
+      auth: { token: 'eyJhbGciOiJIUzI1NiJ9.secret-jwt.sig', apiUrl: 'https://app.yocoolab.com' },
+    }));
+    expect(res.status).toBe(200);
+    const stored = store.latest() as unknown as Record<string, unknown>;
+    expect(stored.correlationId).toBe('with-auth');
+    expect('auth' in stored).toBe(false);
+    for (const path of ['/selections/latest', '/selections']) {
+      const served = await request(port, 'GET', path);
+      expect(served.body).toContain('with-auth');
+      expect(served.body).not.toContain('secret-jwt');
+      expect(served.body).not.toContain('"auth"');
+    }
   });
 
   it('GET /selections/latest returns null when empty', async () => {

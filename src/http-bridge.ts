@@ -296,6 +296,11 @@ export function startHttpBridge(
           if (!payload.timestamp) {
             payload.timestamp = Date.now();
           }
+          // Credentials never enter the store: it is served to every local
+          // caller and get_latest_selection prints it whole into the agent's
+          // transcript. Older extension builds put the person's Yocoolab JWT
+          // here as `auth: { token, apiUrl }`; nothing in this server reads it.
+          delete payload.auth;
 
           store.push(payload);
 
