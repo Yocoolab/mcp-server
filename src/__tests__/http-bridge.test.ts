@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import http from 'node:http';
+import { execFile } from 'node:child_process';
 import { SelectionStore } from '../selection-store.js';
-import { startHttpBridge, type BridgeResult } from '../http-bridge.js';
+import { startHttpBridge, notificationArgs, type BridgeResult } from '../http-bridge.js';
 
 // Mock child_process.execFile to prevent macOS notifications during tests
 vi.mock('node:child_process', () => ({
@@ -9,6 +10,24 @@ vi.mock('node:child_process', () => ({
     cb(null);
   }),
 }));
+
+const execFileMock = vi.mocked(execFile);
+
+/** The argv of every osascript run since the last clear. */
+function osascriptRuns(): string[][] {
+  return execFileMock.mock.calls.filter((c) => c[0] === 'osascript').map((c) => c[1] as unknown as string[]);
+}
+
+/** The AppleScript source of one run: every value that follows an `-e`. */
+function scriptSource(args: string[]): string {
+  return args.filter((_v, i) => args[i - 1] === '-e').join('\n');
+}
+
+/** What the run handler receives: everything after `--`. */
+function scriptArgv(args: string[]): string[] | null {
+  const at = args.indexOf('--');
+  return at === -1 ? null : args.slice(at + 1);
+}
 
 function request(
   port: number,
@@ -376,6 +395,46 @@ describe('HTTP Bridge', () => {
     const page = await openThreadUpdates(port, { Origin: PAGE_ORIGIN });
     expect(page.status).toBe(403);
     expect(page.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  // ─── macOS notifications: text is an argument, never AppleScript ──
+
+  it('notificationArgs runs one fixed script and passes title, subtitle and text as its arguments', () => {
+    const text = 'x\\" & (do shell script "id") & \\"';
+    const args = notificationArgs(text, 'Yocoolab Companion', 'New message');
+    expect(scriptSource(args)).toBe('on run argv\ndisplay notification (item 1 of argv) with title (item 2 of argv) subtitle (item 3 of argv)\nend run');
+    expect(scriptArgv(args)).toEqual([text, 'Yocoolab Companion', 'New message']);
+  });
+
+  it('a companion message with a backslash before a quote never becomes AppleScript source', async () => {
+    execFileMock.mockClear();
+    // On the old builder (quotes escaped, backslashes not) this closes the
+    // string literal and runs `do shell script`.
+    const content = 'hi\\" & (do shell script "id > /tmp/yc-pwned") & \\"';
+    const res = await request(port, 'POST', '/companion/message', JSON.stringify({ content }));
+    expect(res.status).toBe(200);
+    const runs = osascriptRuns();
+    expect(runs).toHaveLength(1);
+    expect(scriptSource(runs[0])).not.toContain('do shell script');
+    expect(scriptArgv(runs[0])).toEqual([content, 'Yocoolab Companion', 'New message']);
+  });
+
+  it('a selection\'s element text and page path reach the notification as an argument only', async () => {
+    execFileMock.mockClear();
+    const text = 'Say \\"hi\\" & (do shell script "id") & "';
+    const res = await request(port, 'POST', '/event', JSON.stringify({
+      type: 'ELEMENT_SELECTED',
+      element: { tag: 'BUTTON', selector: 'button', text },
+      page: { url: 'https://example.com/a%22b/c' },
+    }));
+    expect(res.status).toBe(200);
+    const runs = osascriptRuns();
+    expect(runs).toHaveLength(1);
+    expect(scriptSource(runs[0])).not.toContain('do shell script');
+    expect(scriptSource(runs[0])).not.toContain('example');
+    const argv = scriptArgv(runs[0])!;
+    expect(argv[0]).toBe(`<BUTTON> "${text}" on /a%22b/c`);
+    expect(argv.slice(1)).toEqual(['Yocoolab Bridge', 'Element captured']);
   });
 
   // Regression: the activity monitor surface removed in 3.0.0 must stay gone

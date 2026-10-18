@@ -47,14 +47,32 @@ export interface BridgeResult {
   onCompanionMessage: (callback: (msg: CompanionMessage) => void) => void;
 }
 
+/**
+ * The osascript argv for a macOS notification. The script is fixed; the text,
+ * title and subtitle reach its run handler as arguments (after `--`, so a text
+ * that starts with "-" is not read as an option). Nothing a page, a selection
+ * or a companion message says is ever AppleScript source, so no escaping can
+ * be got wrong — the old builder escaped quotes but not backslashes, and
+ * `\" & (do shell script "…") & \"` ran.
+ */
+export function notificationArgs(text: string, title: string, subtitle: string): string[] {
+  return [
+    '-e', 'on run argv',
+    '-e', 'display notification (item 1 of argv) with title (item 2 of argv) subtitle (item 3 of argv)',
+    '-e', 'end run',
+    '--', text, title, subtitle,
+  ];
+}
+
+function notify(text: string, title: string, subtitle: string, what: string): void {
+  execFile('osascript', notificationArgs(text, title, subtitle), (err) => {
+    if (err) process.stderr.write(`[yocoolab] ${what} error: ${err.message}\n`);
+  });
+}
+
 function notifyCompanionMessage(content: string): void {
   const preview = content.length > 80 ? content.slice(0, 77) + '...' : content;
-  execFile('osascript', [
-    '-e',
-    `display notification "${preview.replace(/"/g, '\\"')}" with title "Yocoolab Companion" subtitle "New message"`,
-  ], (err) => {
-    if (err) process.stderr.write(`[yocoolab] Companion notification error: ${err.message}\n`);
-  });
+  notify(preview, 'Yocoolab Companion', 'New message', 'Companion notification');
 }
 
 function notifySelection(tag: string, text: string, pageUrl: string): void {
@@ -63,15 +81,7 @@ function notifySelection(tag: string, text: string, pageUrl: string): void {
   try {
     urlPath = new URL(pageUrl).pathname;
   } catch { /* ignore invalid URLs */ }
-  // Element text is user content: a quote or backslash would break the
-  // AppleScript string ("syntax error: A identifier can't go after this").
-  const esc = (v: string) => v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  execFile('osascript', [
-    '-e',
-    `display notification "${esc(label)} on ${esc(urlPath)}" with title "Yocoolab Bridge" subtitle "Element captured"`,
-  ], (err) => {
-    if (err) process.stderr.write(`[yocoolab] Notification error: ${err.message}\n`);
-  });
+  notify(`${label} on ${urlPath}`, 'Yocoolab Bridge', 'Element captured', 'Notification');
 }
 
 export function startHttpBridge(port: number, store: SelectionStore): BridgeResult {
