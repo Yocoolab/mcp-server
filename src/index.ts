@@ -17,7 +17,7 @@ import { handleListThreads } from './tools/list-threads.js';
 import { handleGetContext } from './tools/get-context.js';
 import { handleCreatePr } from './tools/create-pr.js';
 import { handleMarkAddressed } from './tools/mark-addressed.js';
-import { PROJECT_PR_LINKS } from './feature-flags.js';
+import { AGENT_BRIEF, PROJECT_PR_LINKS } from './feature-flags.js';
 import { handleGetDeploymentPreview } from './tools/get-deployment-preview.js';
 import { handleAddThreadMessage } from './tools/add-thread-message.js';
 import { registerGetLatestSelection } from './tools/get-latest-selection.js';
@@ -271,7 +271,7 @@ function startServer(): void {
   if (api) {
     server.tool(
       'list_open_threads',
-      'List open feedback threads. Omit repo to get ALL threads across every repo you have access to — each result is labeled with its repo, change type (frontend/api/backend), board stage, and UI element context. Use claude_code_pending=true to only show threads that users have sent to Claude Code.',
+      'List open feedback threads. Omit repo to get ALL threads across every repo you have access to — each result is labeled with its repository, change type (frontend/api/backend), board stage, project lane, and UI element context. Use claude_code_pending=true to only show threads that users have sent to Claude Code.',
       {
         repo: z.string().optional().describe('Optional repository filter (e.g., "org/repo-name"). Omit to list threads across ALL your connected repos.'),
         branch: z.string().optional().describe('Optional branch filter (e.g., "main", "feature/xyz")'),
@@ -284,7 +284,9 @@ function startServer(): void {
   
     server.tool(
       'get_thread_context',
-      'Get full details of a feedback thread including all messages, UI element context (selector, coordinates, element tag), view state, and the annotated screenshot. The screenshot is returned as an image so you can visually see the feedback location.',
+      AGENT_BRIEF
+        ? 'Get the agent brief for a feedback thread: what to change (the ask and any design-panel edits, with authored values when known), which repository it belongs in and how to check you are in it, how to find the element in the source, how to verify the change, and how to report back (mark_thread_addressed). Its screenshots follow as images — the element crop, the full page, attached elements, the sketch and reply images — numbered as the brief lists them. On a backend without the brief it returns the raw thread details instead.'
+        : 'Get full details of a feedback thread including all messages, UI element context (selector, coordinates, element tag), view state, and the annotated screenshot. The screenshot is returned as an image so you can visually see the feedback location.',
       {
         thread_id: z.string().describe('The UUID of the thread to fetch'),
       },

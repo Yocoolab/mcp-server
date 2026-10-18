@@ -46,6 +46,32 @@ export interface ThreadSummary {
   // the project points at ([{role, url}]), so a remote agent knows where to
   // open its PR. Returned by GET /threads and GET /threads/:id.
   repo_links?: RepoLink[];
+  // The project-pipeline lane the thread's page belongs to (design /
+  // production / qa), or null outside any lane. GET /threads and GET /:id.
+  lane?: string | null;
+  // GET /:id only, and only for a reader who can open the project.
+  project_name?: string | null;
+  environment?: string | null;
+  // Which repository the thread belongs in, when the API names it (a label
+  // string, or the brief's repository object). Not returned by GET /threads
+  // today; printed by list_open_threads when it is.
+  repository?: string | ThreadRepositoryLabel | null;
+  // Elements pinned along with the main one; each may carry its own
+  // screenshot (a data URL).
+  attached_elements?: AttachedElement[] | null;
+}
+
+export interface ThreadRepositoryLabel {
+  kind?: string | null;
+  full_name?: string | null;
+  url?: string | null;
+}
+
+export interface AttachedElement {
+  tagName?: string | null;
+  textContent?: string | null;
+  description?: string | null;
+  screenshot?: string | null;
 }
 
 export interface RepoLink {
@@ -60,6 +86,8 @@ export interface MessageDetail {
   created_at: string;
   author_name: string;
   author_email: string;
+  // Images posted with the message: {url} is a data:image/* URL or an https link.
+  attachments?: Array<{ url?: string | null; type?: string | null; name?: string | null }> | null;
 }
 
 export interface IterationSummary {
@@ -116,6 +144,80 @@ export interface DeploymentInfo {
 }
 
 /**
+ * GET /threads/:id/brief?format=json — the agent brief: one text, built on the
+ * server, that says what to change, in which repository, how to find and check
+ * it and how to report back. The dashboard and the extension copy the same
+ * text. Only the fields this server reads are typed strictly.
+ */
+export interface AgentBrief {
+  brief_version: number;
+  markdown: string;
+  repository: {
+    kind: string;
+    url: string | null;
+    full_name: string | null;
+    host: string | null;
+    confirmed: boolean;
+    candidates: { url: string; role: string | null }[];
+    branch: string | null;
+    branch_source: string;
+    branch_use: 'base' | 'work' | null;
+    base_branch: string | null;
+    hint: string | null;
+    project_name?: string | null;
+    lane?: string | null;
+    environment?: string | null;
+  };
+  /** The screenshots the brief's last line names, numbered in this order. */
+  images: BriefImage[];
+  close_loop: Record<string, unknown>;
+  draft_count?: number;
+}
+
+export interface BriefImage {
+  n: number;
+  kind: 'element' | 'page' | 'attached_element' | 'sketch' | 'attachment';
+  label: string;
+  /** attached_element: its element number (2, 3, …). */
+  element?: number;
+  /** attachment: the conversation number of its message, and its index there. */
+  message?: number;
+  attachment?: number;
+}
+
+/** POST /threads/:id/addressed — what the backend recorded, and what it refused. */
+export interface AddressedResult {
+  ok: boolean;
+  thread: {
+    id: string;
+    repo: string;
+    status: string;
+    kanban_stage: string | null;
+    claude_code_pending: boolean;
+    pr_url: string | null;
+    pr_number: number | null;
+    pr_branch: string | null;
+  };
+  message: { id: string; content: string } | null;
+  recorded: { pr_url: string | null; pr_number: number | null; pr_branch: string | null; preview_url: string | null };
+  rejected: { field: string; error: string }[];
+}
+
+/** GET /threads/:id/images — the thread's stored images, keyed by kind. */
+export type ThreadImages = Record<string, { dataUrl: string | null; w?: number | null; h?: number | null } | undefined>;
+
+/** A failed API call, with the HTTP status so callers can tell a missing route (404) from a refusal. */
+export class YocoolabApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'YocoolabApiError';
+    this.status = status;
+  }
+}
+
+/**
  * The display name this agent signs its thread messages with. Reads
  * YOCOOLAB_AGENT_NAME at call time (same env the bridge registration uses) so
  * each agent profile — "Hermes Agent", "Claude Code", "Cursor", … — shows up
@@ -149,7 +251,7 @@ export class YocoolabApiClient {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`API request failed: ${response.status} ${response.statusText} — ${body}`);
+      throw new YocoolabApiError(`API request failed: ${response.status} ${response.statusText} — ${body}`, response.status);
     }
 
     return response.json() as Promise<T>;
@@ -175,6 +277,80 @@ export class YocoolabApiClient {
    */
   async getThread(threadId: string): Promise<ThreadDetail> {
     return this.request<ThreadDetail>(`/threads/${threadId}`);
+  }
+
+  /**
+   * The agent brief for a thread (GET /threads/:id/brief?format=json).
+   * `images: 'attached'` words its screenshot line for a client that sends
+   * the images along, as get_thread_context does. Drafts are included unless
+   * `drafts: false`. Returns null on 404: a backend from before the brief, or
+   * one with the brief turned off (BRIEF_ENABLED=0) — callers build their own
+   * text then.
+   */
+  async getThreadBrief(
+    threadId: string,
+    options: { drafts?: boolean; images?: 'attached' | 'paste' } = {}
+  ): Promise<AgentBrief | null> {
+    const params = new URLSearchParams({ format: 'json' });
+    if (options.drafts === false) params.set('drafts', '0');
+    if (options.images) params.set('images', options.images);
+    try {
+      return await this.request<AgentBrief>(`/threads/${encodeURIComponent(threadId)}/brief?${params.toString()}`);
+    } catch (err) {
+      if (err instanceof YocoolabApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  /**
+   * The thread's stored images (GET /threads/:id/images), keyed by kind —
+   * `element` is the native-resolution crop of the pinned element. `kind`
+   * fetches just that one. A backend without the route answers {}.
+   */
+  async getThreadImages(threadId: string, kind?: string): Promise<ThreadImages> {
+    const qs = kind ? `?${new URLSearchParams({ kind }).toString()}` : '';
+    try {
+      return await this.request<ThreadImages>(`/threads/${encodeURIComponent(threadId)}/images${qs}`);
+    } catch (err) {
+      if (err instanceof YocoolabApiError && err.status === 404) return {};
+      throw err;
+    }
+  }
+
+  /** The thread's sketch (GET /threads/:id/sketch); `png` is a data URL. Null when there is none. */
+  async getThreadSketch(threadId: string): Promise<{ png?: string | null } | null> {
+    try {
+      return await this.request<{ png?: string | null } | null>(`/threads/${encodeURIComponent(threadId)}/sketch`);
+    } catch (err) {
+      if (err instanceof YocoolabApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  /**
+   * Report the work on a thread in one call (POST /threads/:id/addressed):
+   * the backend moves it to In Review and clears claude_code_pending (never
+   * resolves it), records the PR links it accepts — a bad one is named in
+   * `rejected` and blocks nothing — and posts the message as a reply signed
+   * with this agent's name, with the notifications and live updates a reply
+   * gets. Returns null on 404 (a backend from before the route); callers then
+   * take the old PATCH + message path.
+   */
+  async addressThread(
+    threadId: string,
+    body: { message?: string; pr_url?: string | null; pr_branch?: string | null; preview_url?: string | null }
+  ): Promise<AddressedResult | null> {
+    const payload: Record<string, unknown> = { author_display_name: agentDisplayName() };
+    for (const [k, v] of Object.entries(body)) if (v != null && v !== '') payload[k] = v;
+    try {
+      return await this.request<AddressedResult>(`/threads/${encodeURIComponent(threadId)}/addressed`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      if (err instanceof YocoolabApiError && err.status === 404) return null;
+      throw err;
+    }
   }
 
   /**

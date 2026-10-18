@@ -70,6 +70,7 @@ The `@3` version pin keeps you on the v3 major line — you'll receive bug fixes
 | `YOCOOLAB_BRIDGE_WORKSPACE` | no | `process.cwd()` | Absolute path to your project workspace, used to resolve file references in selections |
 | `YOCOOLAB_AGENT_NAME` | no | `Claude Code` | Display name shown in the Chrome extension's agent picker |
 | `YOCOOLAB_PROJECT_PR_LINKS` | no | `1` | Set to `0` to restore the pre-2.5 behaviour: `mark_thread_addressed` without PR/preview link fields, GitHub-only PR guidance in the prompt |
+| `YOCOOLAB_AGENT_BRIEF` | no | `1` | Set to `0` to stop using the backend's agent brief: `get_thread_context` builds the thread text itself again, `mark_thread_addressed` reports step by step, and `list_open_threads` prints the raw repo key |
 | `YOCOOLAB_AGENT_TYPE` | no | `claude-code` | Agent type identifier (`claude-code`, `roo`, `cline`, `cursor`, `windsurf`, or `custom`) |
 
 ## CLI
@@ -88,6 +89,7 @@ The `mcp-server` command is a synonym for `yocoolab-mcp`. Either works.
 The server exposes tools across several categories:
 
 - **Threads** — `list_open_threads`, `get_thread_context`, `add_thread_message`, `mark_thread_addressed`, `create_pr_for_thread`
+  - `get_thread_context` returns the thread's agent brief — the same text the dashboard and the extension copy: the ask, which repository it belongs in (and how to check you are in it), how to find the element, the change, how to verify it and how to report back — followed by its screenshots as images, numbered as the brief lists them.
   - On a link-only project (no GitHub App connection) open the PR with your own git/`gh`, then call `mark_thread_addressed` with `pr_url` (and `pr_branch`, `preview_url` when you have them). The PR fields land on the thread and the preview link goes into the review message; `get_thread_context` prints the project's repo links so you know which repository it points at. `create_pr_for_thread` remains for GitHub-connected `owner/name` workspaces.
 - **Selection / Bridge** — `get_latest_selection`, `get_selection_history`, `get_element_context`, `find_source_for_selection`, `ai_analyze_page`
 - **Companion** — `get_companion_messages`, `reply_to_companion`

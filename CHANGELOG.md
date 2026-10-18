@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
+### Changed
+- `get_thread_context` returns the backend's agent brief (`GET /threads/:id/brief`) — the same text the dashboard's and the extension's "Copy thread text" give: the ask, which repository the thread belongs in (connected, linked, or inferred from the page URL, with how to check you're in it), how to find the element in the source, the change with its authored values, how to verify it and how to report back. The screenshots follow as image blocks in the brief's order, each after its `[n] label` line: the element crop (`GET /threads/:id/images`), the full page, attached elements, the sketch and reply images. An image that can't be sent (a link, over 5 MB, missing) is named instead, so the numbers still line up. A backend without the brief (404, or `BRIEF_ENABLED=0`) or one that fails to build it (5xx) gets the previous text, which now leaves out what was typed into form controls and the page address's query string.
+- `mark_thread_addressed` reports in one call (`POST /threads/:id/addressed`): the backend moves the thread to In Review, records the PR links it accepts, posts the message as a reply signed with `YOCOOLAB_AGENT_NAME` and notifies. A link it refuses is named in the result; it blocks nothing. The github.io pr-preview link for GitHub-App-connected `owner/name` repos is still derived and handed over. A backend without the route (404) gets the previous PATCH + message + notify path.
+- `list_open_threads` prints a `Repository:` line instead of the raw repo key: the API's repository label when it gives one, else the `owner/name` repository (GitHub-connected), else "link-only project" and a pointer to `get_thread_context` — never the internal `project:<uuid>` key. It also prints the project lane (Design/Production/QA), keeps multi-line element text on one line (⏎), and leaves out form-control text and page query strings.
+- Kill switch: `YOCOOLAB_AGENT_BRIEF=0` restores the previous behaviour of all three.
+
 ### Security
 - `POST /event` drops the payload's `auth` block before storing it. Older Chrome extension builds put the person's Yocoolab JWT there (`auth: { token, apiUrl }`) on Send to Agent; the bridge kept it and served it from `/selections*` and `get_latest_selection`. Nothing in this server ever read it.
 - The bridge no longer answers every route with `Access-Control-Allow-Origin: *`. CORS now follows who actually calls each route from a browser:

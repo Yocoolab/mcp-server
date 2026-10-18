@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { YocoolabApiClient } from '../api-client.js';
+import { YocoolabApiClient, YocoolabApiError, agentDisplayName } from '../api-client.js';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -134,6 +134,91 @@ describe('YocoolabApiClient', () => {
     });
   });
 
+  describe('getThreadBrief', () => {
+    it('calls GET /threads/:id/brief?format=json, worded for attached images when asked', async () => {
+      const brief = { brief_version: 1, markdown: '## Yocoolab thread t1\n', images: [] };
+      mockFetch.mockResolvedValueOnce(jsonResponse(brief));
+      const result = await api.getThreadBrief('t1', { images: 'attached' });
+
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toBe('http://localhost:3000/api/v1/threads/t1/brief?format=json&images=attached');
+      expect(opts.method).toBeUndefined();
+      expect(result).toEqual(brief);
+    });
+
+    it('leaves drafts out only when asked', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ markdown: 'x' }));
+      await api.getThreadBrief('t1', { drafts: false });
+
+      expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:3000/api/v1/threads/t1/brief?format=json&drafts=0');
+    });
+
+    it('returns null on 404 (a backend from before the brief, or the brief turned off)', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ error: 'The agent brief is turned off', code: 'brief_disabled' }, 404));
+      expect(await api.getThreadBrief('t1')).toBeNull();
+    });
+
+    it('throws other failures with their status', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ error: 'Guests cannot read the agent brief' }, 403));
+      const err = await api.getThreadBrief('t1').catch((e) => e);
+
+      expect(err).toBeInstanceOf(YocoolabApiError);
+      expect(err.status).toBe(403);
+    });
+
+    it('encodes the thread id into the path', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ markdown: 'x' }));
+      await api.getThreadBrief('../threads?x=1');
+
+      expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:3000/api/v1/threads/..%2Fthreads%3Fx%3D1/brief?format=json');
+    });
+  });
+
+  describe('getThreadImages / getThreadSketch', () => {
+    it('asks /threads/:id/images for one kind', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ element: { dataUrl: 'data:image/png;base64,AA', w: 1, h: 1 } }));
+      const result = await api.getThreadImages('t1', 'element');
+
+      expect(mockFetch.mock.calls[0][0]).toBe('http://localhost:3000/api/v1/threads/t1/images?kind=element');
+      expect(result.element?.dataUrl).toBe('data:image/png;base64,AA');
+    });
+
+    it('a backend without /images answers {}; without a sketch, null', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ error: 'Not found' }, 404));
+      expect(await api.getThreadImages('t1')).toEqual({});
+      mockFetch.mockResolvedValueOnce(jsonResponse({ error: 'Not found' }, 404));
+      expect(await api.getThreadSketch('t1')).toBeNull();
+    });
+  });
+
+  describe('addressThread', () => {
+    it('POSTs /threads/:id/addressed with the links, the message and the agent name — and nothing empty', async () => {
+      const answer = { ok: true, thread: { id: 't1' }, message: null, recorded: {}, rejected: [] };
+      mockFetch.mockResolvedValueOnce(jsonResponse(answer));
+      const result = await api.addressThread('t1', {
+        message: 'Done',
+        pr_url: 'https://github.com/acme/repo/pull/42',
+        pr_branch: null,
+        preview_url: '',
+      });
+
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toBe('http://localhost:3000/api/v1/threads/t1/addressed');
+      expect(opts.method).toBe('POST');
+      expect(JSON.parse(opts.body)).toEqual({
+        author_display_name: agentDisplayName(),
+        message: 'Done',
+        pr_url: 'https://github.com/acme/repo/pull/42',
+      });
+      expect(result).toEqual(answer);
+    });
+
+    it('returns null on 404 (a backend from before the route)', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ error: 'Not found' }, 404));
+      expect(await api.addressThread('t1', {})).toBeNull();
+    });
+  });
+
   describe('error handling', () => {
     it('throws on non-200 response', async () => {
       mockFetch.mockResolvedValueOnce({
@@ -144,6 +229,15 @@ describe('YocoolabApiClient', () => {
       });
 
       await expect(api.getThread('missing')).rejects.toThrow('API request failed: 404 Not Found');
+    });
+
+    it('carries the HTTP status on the error', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ error: 'boom' }, 500));
+      const err = await api.getThread('t1').catch((e) => e);
+
+      expect(err).toBeInstanceOf(YocoolabApiError);
+      expect(err).toBeInstanceOf(Error);
+      expect(err.status).toBe(500);
     });
   });
 });

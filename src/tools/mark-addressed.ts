@@ -1,6 +1,7 @@
 import { YocoolabApiClient } from '../api-client.js';
+import type { AddressedResult, ThreadDetail } from '../api-client.js';
 import type { ThreadUpdateEmitter } from '../http-bridge.js';
-import { PROJECT_PR_LINKS, isOwnerNameKey } from '../feature-flags.js';
+import { AGENT_BRIEF, PROJECT_PR_LINKS, isOwnerNameKey } from '../feature-flags.js';
 
 export interface MarkAddressedArgs {
   thread_id: string;
@@ -28,6 +29,19 @@ function cleanUrl(v: string | undefined): string | null {
   return s ? s : null;
 }
 
+/**
+ * The GitHub Pages pr-preview address — ONLY for GitHub-App-connected
+ * "owner/name" repos, from the PR the agent hands over or the one already on
+ * the thread.
+ */
+function derivedPreviewUrl(thread: Pick<ThreadDetail, 'repo' | 'pr_number'>, prUrl: string | null): string | null {
+  if (!isOwnerNameKey(thread.repo)) return null;
+  const prNumber = (prUrl ? derivePrNumber(prUrl) : null) ?? thread.pr_number ?? null;
+  if (!prNumber) return null;
+  const [owner, repo] = thread.repo.split('/');
+  return `https://${owner.toLowerCase()}.github.io/${repo}/pr-preview/pr-${prNumber}/`;
+}
+
 export async function handleMarkAddressed(
   api: YocoolabApiClient,
   args: MarkAddressedArgs,
@@ -37,10 +51,90 @@ export async function handleMarkAddressed(
     return handleMarkAddressedLegacy(api, args, emitThreadUpdate);
   }
 
-  // Fetch thread to get repo + any PR already recorded
-  const thread = await api.getThread(args.thread_id);
-  const ownerName = isOwnerNameKey(thread.repo);
+  // The preview: what the agent tells us, else the pr-preview convention,
+  // which needs the thread's key and PR number — the only reason to read the
+  // thread before reporting.
+  let thread: ThreadDetail | null = null;
+  let previewUrl = cleanUrl(args.preview_url);
+  if (!previewUrl) {
+    thread = await api.getThread(args.thread_id);
+    previewUrl = derivedPreviewUrl(thread, cleanUrl(args.pr_url));
+  }
 
+  // One call: the backend moves the stage, records the links it accepts,
+  // posts the reply and notifies (POST /threads/:id/addressed). A backend from
+  // before that route answers 404 → the step-by-step path below.
+  if (AGENT_BRIEF) {
+    const result = await api.addressThread(args.thread_id, {
+      message: args.message,
+      pr_url: cleanUrl(args.pr_url),
+      pr_branch: cleanUrl(args.pr_branch),
+      preview_url: previewUrl,
+    });
+    if (result) return reportAddressed(args, result, previewUrl, emitThreadUpdate);
+  }
+
+  return markAddressedStepwise(api, args, thread ?? await api.getThread(args.thread_id), emitThreadUpdate);
+}
+
+/** The tool result (and the extension's live update) for a POST /addressed answer. */
+function reportAddressed(
+  args: MarkAddressedArgs,
+  result: AddressedResult,
+  previewUrl: string | null,
+  emitThreadUpdate?: ThreadUpdateEmitter
+) {
+  const recorded = result.recorded || { pr_url: null, pr_number: null, pr_branch: null, preview_url: null };
+  const rejected = Array.isArray(result.rejected) ? result.rejected : [];
+  const posted = result.message?.content || '';
+  const explicitPreview = cleanUrl(args.preview_url);
+
+  // Push SSE event so the extension flips to the "In review" state. The
+  // backend also tells the dashboard and the extension panels itself.
+  if (emitThreadUpdate) {
+    emitThreadUpdate(args.thread_id, 'thread_in_review', {
+      status: result.thread?.status || 'open',
+      kanban_stage: 'in_review',
+      message: posted || null,
+      pr_url: result.thread?.pr_url ?? null,
+      pr_number: result.thread?.pr_number ?? null,
+      pr_branch: result.thread?.pr_branch ?? null,
+      preview_url: recorded.preview_url ?? null,
+    });
+  }
+
+  const links: string[] = [];
+  if (recorded.pr_url) links.push(`PR ${recorded.pr_url}${recorded.pr_number != null ? ` (#${recorded.pr_number})` : ''}`);
+  if (recorded.pr_branch) links.push(`branch ${recorded.pr_branch}`);
+  if (explicitPreview && recorded.preview_url) links.push(`preview ${recorded.preview_url}`);
+  const refused = rejected.map((r) => `${r.field} (${r.error})`);
+
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: [
+          `Thread ${args.thread_id} moved to In Review — it is ready for a human to verify and close. It was NOT auto-resolved (only a person closes a thread).`,
+          links.length ? `Links recorded on the thread: ${links.join(', ')}.` : '',
+          refused.length ? `Not recorded: ${refused.join(', ')}. The thread still moved to In Review and the reply went out; put the right link in a follow-up message if it matters.` : '',
+          posted ? `Message added: "${posted}"` : '',
+          previewUrl && !explicitPreview && recorded.preview_url ? `Preview: ${recorded.preview_url}` : '',
+        ].filter(Boolean).join(' '),
+      },
+    ],
+  };
+}
+
+/**
+ * The step-by-step report for a backend without POST /threads/:id/addressed:
+ * the stage PATCH, the links PATCH, the review message and the notification.
+ */
+async function markAddressedStepwise(
+  api: YocoolabApiClient,
+  args: MarkAddressedArgs,
+  thread: ThreadDetail,
+  emitThreadUpdate?: ThreadUpdateEmitter
+) {
   // PR links the agent is recording now (link-only projects: the agent opened
   // the PR with its own git/gh and hands us the URL).
   const prUrl = cleanUrl(args.pr_url);
@@ -50,11 +144,7 @@ export async function handleMarkAddressed(
 
   // Preview: prefer what the agent tells us; fall back to the GitHub Pages
   // pr-preview convention ONLY for GitHub-App-connected "owner/name" repos.
-  let previewUrl: string | null = cleanUrl(args.preview_url);
-  if (!previewUrl && ownerName && effectivePrNumber) {
-    const [owner, repo] = thread.repo.split('/');
-    previewUrl = `https://${owner.toLowerCase()}.github.io/${repo}/pr-preview/pr-${effectivePrNumber}/`;
-  }
+  const previewUrl: string | null = cleanUrl(args.preview_url) ?? derivedPreviewUrl(thread, prUrl);
 
   const linksRecorded = Boolean(prUrl || cleanUrl(args.preview_url));
 

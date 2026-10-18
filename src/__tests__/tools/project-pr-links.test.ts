@@ -71,9 +71,10 @@ describe('isOwnerNameKey', () => {
   });
 });
 
+// The legacy builder (a backend without the agent brief: the brief 404s → null).
 describe.skipIf(!PROJECT_PR_LINKS)('get_thread_context prints repo_links', () => {
   it('lists each link as role: url for a link-only project', async () => {
-    const api = { getThread: vi.fn().mockResolvedValue(baseThread({ repo_links: REPO_LINKS })) } as unknown as YocoolabApiClient;
+    const api = { getThread: vi.fn().mockResolvedValue(baseThread({ repo_links: REPO_LINKS })), getThreadBrief: vi.fn().mockResolvedValue(null) } as unknown as YocoolabApiClient;
     const result = await handleGetContext(api, { thread_id: 'thread-1' });
     const text = result.content[0].type === 'text' ? result.content[0].text : '';
     expect(text).toContain('**Repo links:**');
@@ -82,7 +83,7 @@ describe.skipIf(!PROJECT_PR_LINKS)('get_thread_context prints repo_links', () =>
   });
 
   it('omits the section when there are no links', async () => {
-    const api = { getThread: vi.fn().mockResolvedValue(baseThread({ repo: 'acme/site', repo_links: [] })) } as unknown as YocoolabApiClient;
+    const api = { getThread: vi.fn().mockResolvedValue(baseThread({ repo: 'acme/site', repo_links: [] })), getThreadBrief: vi.fn().mockResolvedValue(null) } as unknown as YocoolabApiClient;
     const result = await handleGetContext(api, { thread_id: 'thread-1' });
     const text = result.content[0].type === 'text' ? result.content[0].text : '';
     expect(text).not.toContain('Repo links');

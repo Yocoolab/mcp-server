@@ -1,5 +1,22 @@
 import { YocoolabApiClient } from '../api-client.js';
-import { PROJECT_PR_LINKS } from '../feature-flags.js';
+import type { ThreadSummary } from '../api-client.js';
+import { AGENT_BRIEF, PROJECT_PR_LINKS, isOwnerNameKey } from '../feature-flags.js';
+import { elementTextLine, isFormControlTag, laneName, pageAddress, repositoryLabel } from '../thread-text.js';
+
+/**
+ * Which repository a thread belongs in, as far as the list can say. The API's
+ * own label when it gives one; else an "owner/name" key IS the repository (a
+ * GitHub-App-connected one); else the key is a link-only project's internal
+ * id ("project:<uuid>"), which names no codebase — get_thread_context does.
+ */
+function repositoryLine(t: ThreadSummary): string {
+  const label = repositoryLabel(t.repository);
+  if (label) return label;
+  if (isOwnerNameKey(t.repo)) {
+    return `${t.repo}${t.branch ? ` (branch: ${t.branch})` : ''} — connected through Yocoolab's GitHub App (create_pr_for_thread works)`;
+  }
+  return 'link-only project — get_thread_context names the repository (linked, inferred from the page URL, or not linked yet)';
+}
 
 export async function handleListThreads(
   api: YocoolabApiClient,
@@ -49,21 +66,31 @@ export async function handleListThreads(
   const summary = threads.map((t, i) => {
     const parts = [
       `${i + 1}. **Thread ${t.id}**`,
-      `   Repo: ${t.repo}${t.branch ? ` (branch: ${t.branch})` : ''}`,
+      AGENT_BRIEF
+        ? `   Repository: ${repositoryLine(t)}`
+        : `   Repo: ${t.repo}${t.branch ? ` (branch: ${t.branch})` : ''}`,
       `   Priority: ${t.priority} | Messages: ${t.message_count} | By: ${t.creator_name}`,
       `   Created: ${t.created_at}`,
     ];
     // Change type + board stage — enough context to route and act:
-    // frontend/api/backend/other, and where the card sits on the board.
+    // frontend/api/backend/other, and where the card sits on the board — and
+    // the project lane (Design/Production/QA) the page belongs to.
+    const lane = AGENT_BRIEF ? laneName(t.lane) : null;
     const meta = [
       t.service_type ? `Type: ${t.service_type}` : '',
       t.kanban_stage ? `Stage: ${t.kanban_stage}` : '',
+      lane ? `Lane: ${lane}` : '',
     ].filter(Boolean).join(' | ');
     if (meta) parts.push(`   ${meta}`);
     if (t.claude_code_pending) parts.push(`   ⚡ Pending for Claude Code`);
     if (t.selector) parts.push(`   Element: \`${t.selector}\``);
-    if (t.element_tag) parts.push(`   Tag: <${t.element_tag}>${t.element_text ? ` "${t.element_text}"` : ''}`);
-    if (t.page_url) parts.push(`   Page: ${t.page_url}`);
+    // A form control's text is what someone typed into it — never printed.
+    // Multi-line text stays on the row: line breaks print as ⏎.
+    if (t.element_tag) {
+      const text = isFormControlTag(t.element_tag) ? '' : elementTextLine(t.element_text);
+      parts.push(`   Tag: <${t.element_tag}>${text ? ` "${text}"` : ''}`);
+    }
+    if (t.page_url) parts.push(`   Page: ${pageAddress(t.page_url)}`);
     if (t.jira_issue_key) parts.push(`   Jira: ${t.jira_issue_key}`);
     if (t.pr_url) parts.push(`   PR: ${t.pr_url}`);
     // Link-only projects: which repository the project points at.
