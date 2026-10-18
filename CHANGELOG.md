@@ -4,6 +4,11 @@ All notable changes to `@yocoolab/mcp-server` will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Security
+- `POST /event` drops the payload's `auth` block before storing it. Older Chrome extension builds put the person's Yocoolab JWT there (`auth: { token, apiUrl }`) on Send to Agent; the bridge kept it and served it from `/selections*` and `get_latest_selection`. Nothing in this server ever read it.
+
 ## 3.0.0 — 2026-10-03
 
 ### Removed
