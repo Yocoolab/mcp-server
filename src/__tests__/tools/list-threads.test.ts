@@ -156,7 +156,26 @@ describe.skipIf(!AGENT_BRIEF)('list_open_threads repository line', () => {
     const api = makeApi([{ id: 't1', repo: 'acme/site', ...base } as Partial<ThreadSummary>]);
     const text = (await handleListThreads(api, {})).content[0].text;
 
-    expect(text).toContain("Repository: acme/site (branch: main) — connected through Yocoolab's GitHub App (create_pr_for_thread works)");
+    expect(text).toContain("Repository: acme/site — connected through Yocoolab's GitHub App (create_pr_for_thread works)");
+  });
+
+  // threads.branch is "main" whenever the extension had nothing better; the
+  // brief refuses to echo it ("Base branch: develop" for a repo whose default
+  // is develop), so the list must not state it as fact either.
+  it('never prints threads.branch for an "owner/name" key', async () => {
+    const api = makeApi([{ id: 't1', repo: 'acme/web', ...base } as Partial<ThreadSummary>]);
+    const text = (await handleListThreads(api, {})).content[0].text;
+
+    expect(text).not.toContain('branch: main');
+    expect(text).not.toMatch(/\(branch/);
+  });
+
+  it("names the PR's own branch next to the PR when the thread has one", async () => {
+    const api = makeApi([{ id: 't1', repo: 'acme/web', ...base, pr_url: 'https://github.com/acme/web/pull/9', pr_branch: 'yocoolab/feedback' } as Partial<ThreadSummary>]);
+    const text = (await handleListThreads(api, {})).content[0].text;
+
+    expect(text).toContain('PR: https://github.com/acme/web/pull/9 (branch yocoolab/feedback)');
+    expect(text).not.toContain('branch: main');
   });
 
   it('a link-only project never prints its internal key, nor its made-up branch, and points at get_thread_context', async () => {

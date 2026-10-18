@@ -8,12 +8,14 @@ import { elementTextLine, isFormControlTag, laneName, pageAddress, repositoryLab
  * own label when it gives one; else an "owner/name" key IS the repository (a
  * GitHub-App-connected one); else the key is a link-only project's internal
  * id ("project:<uuid>"), which names no codebase — get_thread_context does.
+ * Never threads.branch: it reads "main" whenever the extension had nothing
+ * better, and get_thread_context gives the real base branch.
  */
 function repositoryLine(t: ThreadSummary): string {
   const label = repositoryLabel(t.repository);
   if (label) return label;
   if (isOwnerNameKey(t.repo)) {
-    return `${t.repo}${t.branch ? ` (branch: ${t.branch})` : ''} — connected through Yocoolab's GitHub App (create_pr_for_thread works)`;
+    return `${t.repo} — connected through Yocoolab's GitHub App (create_pr_for_thread works)`;
   }
   return 'link-only project — get_thread_context names the repository (linked, inferred from the page URL, or not linked yet)';
 }
@@ -92,7 +94,7 @@ export async function handleListThreads(
     }
     if (t.page_url) parts.push(`   Page: ${pageAddress(t.page_url)}`);
     if (t.jira_issue_key) parts.push(`   Jira: ${t.jira_issue_key}`);
-    if (t.pr_url) parts.push(`   PR: ${t.pr_url}`);
+    if (t.pr_url) parts.push(`   PR: ${t.pr_url}${AGENT_BRIEF && t.pr_branch ? ` (branch ${t.pr_branch})` : ''}`);
     // Link-only projects: which repository the project points at.
     if (PROJECT_PR_LINKS && Array.isArray(t.repo_links) && t.repo_links.length > 0) {
       const links = t.repo_links
