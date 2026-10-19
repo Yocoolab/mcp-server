@@ -19,7 +19,27 @@ With this installed, your AI coding assistant can:
 - Inspect element context and selection history from the Yocoolab Chrome extension
 - Read companion chat messages, AI conversations, and Pendo product analytics
 
-## Install
+## Recommended: the hosted Yocoolab MCP (nothing to install)
+
+Most people no longer need this package. Yocoolab hosts the MCP server at **`https://app.yocoolab.com/mcp`**. Your agent signs in to Yocoolab in the browser the first time, so there is no token to paste:
+
+```bash
+claude mcp add --transport http --scope user yocoolab https://app.yocoolab.com/mcp
+```
+
+Then type `/mcp` in Claude Code, choose `yocoolab`, and Authenticate. Setup for Cursor, VS Code, the Claude app, and headless agents (agent token in a header) is at **[app.yocoolab.com/connect](https://app.yocoolab.com/connect)**.
+
+**Always-on agent:** to have one computer pick up every Send to Agent in your workspace by itself (it runs Claude Code), run this on that computer:
+
+```bash
+curl -fsSL https://app.yocoolab.com/agent/install.sh | sh
+```
+
+Switching from this package to the hosted server? Remove the old entry first (`claude mcp remove yocoolab`, repeat until none is found). Otherwise Claude may keep using the old one.
+
+Use this package only if you need what runs on your own machine: the local bridge on `:9800` for live selections from the Chrome extension.
+
+## Install (local package)
 
 One command:
 
