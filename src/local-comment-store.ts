@@ -120,4 +120,45 @@ export class LocalCommentStore {
   clear(): void {
     this.writeAll({});
   }
+
+  // ─── Agent → extension write-back queue ──────────────────────────────────
+  // create_local_comments runs in whatever process serves the agent, which is
+  // usually NOT the one that owns the bridge (and so has no SSE clients). It
+  // appends the pins here; the bridge-owning process drains this shared queue
+  // and pushes them to the extension over SSE. So an agent can create pins
+  // without owning the bridge.
+  private queueFile(): string {
+    return path.join(path.dirname(this.file), 'local-creates.json');
+  }
+
+  /** Append agent-created pins to the shared queue. Returns how many were queued. */
+  enqueueCreate(items: Array<Record<string, unknown>>): number {
+    try {
+      const qf = this.queueFile();
+      let q: unknown[] = [];
+      try { const r = JSON.parse(fs.readFileSync(qf, 'utf8')); if (Array.isArray(r)) q = r; } catch { /* empty */ }
+      q.push({ ts: Date.now(), items });
+      fs.mkdirSync(path.dirname(qf), { recursive: true });
+      const tmp = `${qf}.tmp-${process.pid}`;
+      fs.writeFileSync(tmp, JSON.stringify(q));
+      fs.renameSync(tmp, qf);
+      return items.length;
+    } catch { return 0; }
+  }
+
+  /** Remove and return all queued pin items (the bridge owner calls this). */
+  drainCreates(): Array<Record<string, unknown>> {
+    try {
+      const qf = this.queueFile();
+      let q: Array<{ items?: unknown[] }> = [];
+      try { const r = JSON.parse(fs.readFileSync(qf, 'utf8')); if (Array.isArray(r)) q = r; } catch { return []; }
+      if (!q.length) return [];
+      const tmp = `${qf}.tmp-${process.pid}`;
+      fs.writeFileSync(tmp, '[]');
+      fs.renameSync(tmp, qf);
+      const out: Array<Record<string, unknown>> = [];
+      for (const e of q) if (e && Array.isArray(e.items)) out.push(...(e.items as Array<Record<string, unknown>>));
+      return out;
+    } catch { return []; }
+  }
 }

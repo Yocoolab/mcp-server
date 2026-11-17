@@ -101,25 +101,31 @@ describe('get_local_comments', () => {
 });
 
 describe('create_local_comments', () => {
-  it('maps items and reports how many reached the browser', () => {
-    let got: Array<Record<string, unknown>> = [];
-    const emit = (items: Array<Record<string, unknown>>) => { got = items; return 1; };
-    const r = handleCreateLocalComments(emit, { comments: [
+  it('maps items and queues them for the bridge owner to deliver', () => {
+    const store = freshStore();
+    const r = handleCreateLocalComments(store, { comments: [
       { comment: 'Make the CTA green', page_url: 'https://acme.app/', selector: '.cta', priority: 'high' },
       { comment: '   ', page_url: 'https://acme.app/' }, // dropped
     ] });
-    expect(got).toHaveLength(1);
-    expect(got[0]).toMatchObject({ message: 'Make the CTA green', selector: '.cta', priority: 'high', page_url: 'https://acme.app/' });
-    expect(r.content[0].text).toMatch(/Sent 1 pin/);
+    expect(r.content[0].text).toMatch(/Queued 1 pin/);
+    // the bridge owner drains the same (file-backed) queue
+    const drained = store.drainCreates();
+    expect(drained).toHaveLength(1);
+    expect(drained[0]).toMatchObject({ message: 'Make the CTA green', selector: '.cta', priority: 'high', page_url: 'https://acme.app/' });
+    // draining is one-shot
+    expect(store.drainCreates()).toHaveLength(0);
   });
 
-  it('tells the agent to open the panel when no client is listening', () => {
-    const r = handleCreateLocalComments(() => 0, { comments: [{ comment: 'fix it' }] });
-    expect(r.content[0].text).toMatch(/no Yocoolab panel is listening|open the Yocoolab panel/i);
+  it('a different process (store on the same file) drains what was queued', () => {
+    const f = require('node:path').join(require('node:os').tmpdir(), `yc-q-${process.pid}-${Date.now()}.json`);
+    const agentSide = new LocalCommentStore(f);
+    const bridgeSide = new LocalCommentStore(f);
+    handleCreateLocalComments(agentSide, { comments: [{ comment: 'fix spacing', page_url: 'https://a.com/' }] });
+    expect(bridgeSide.drainCreates()).toHaveLength(1);
   });
 
   it('refuses an empty set', () => {
-    const r = handleCreateLocalComments(() => 1, { comments: [{ comment: '  ' }] });
+    const r = handleCreateLocalComments(freshStore(), { comments: [{ comment: '  ' }] });
     expect(r.content[0].text).toMatch(/No valid comments/);
   });
 });

@@ -130,8 +130,8 @@ export function handleGetLocalComments(store: LocalCommentStore, args: { thread_
  */
 type CreateArgs = { comments: Array<{ comment: string; page_url?: string; selector?: string; element_tag?: string; element_text?: string; priority?: string }> };
 
-/** create_local_comments handler — maps items and pushes them to the extension. */
-export function handleCreateLocalComments(emit: (items: Array<Record<string, unknown>>) => number, args: CreateArgs): ToolResult {
+/** create_local_comments handler — queues pins for the bridge owner to push to the extension. */
+export function handleCreateLocalComments(store: LocalCommentStore, args: CreateArgs): ToolResult {
   const items = (args.comments || [])
     .filter((c) => c && c.comment && c.comment.trim())
     .map((c) => ({
@@ -147,18 +147,19 @@ export function handleCreateLocalComments(emit: (items: Array<Record<string, unk
   if (items.length === 0) {
     return { content: [{ type: 'text' as const, text: 'No valid comments to create — each needs a non-empty comment.' }] };
   }
-  const clients = emit(items);
+  // Queue to the shared file; whichever process owns the bridge drains it and
+  // pushes to the extension over SSE — so this works even when THIS process
+  // isn't the bridge owner.
+  store.enqueueCreate(items);
   return {
     content: [{
       type: 'text' as const,
-      text: clients > 0
-        ? `Sent ${items.length} pin(s) to the person's browser — they appear in the Yocoolab panel on the matching page${items.some((i) => !i.page_url) ? ' (items without a page_url land on whichever page they have open)' : ''}.`
-        : `Prepared ${items.length} pin(s), but no Yocoolab panel is listening. Ask the person to open the Yocoolab panel on the page (click the extension icon), then run this again.`,
+      text: `Queued ${items.length} pin(s) for the person's browser — they appear in the Yocoolab panel on the matching page the moment it's open${items.some((i) => !i.page_url) ? ' (items without a page_url land on whichever page they have open)' : ''}.`,
     }],
   };
 }
 
-export function registerCreateLocalComment(server: McpServer, emit: (items: Array<Record<string, unknown>>) => number): void {
+export function registerCreateLocalComment(server: McpServer, store: LocalCommentStore): void {
   server.tool(
     'create_local_comments',
     'Create no-account ("local") Yocoolab pins in the person\'s browser — for example, turning a meeting transcript into pinned feedback. No Yocoolab token or account: the pins are written to the person\'s own browser over the local bridge, nothing is sent to a server. Give each item the page it belongs on and a clear comment; add a CSS selector when you can infer one so the pin lands on the element. The person must have the Yocoolab panel open on that page to receive them.',
@@ -172,7 +173,7 @@ export function registerCreateLocalComment(server: McpServer, emit: (items: Arra
         priority: z.enum(['low', 'normal', 'high']).optional(),
       })).describe('The pins to create.'),
     },
-    async (args: CreateArgs) => handleCreateLocalComments(emit, args)
+    async (args: CreateArgs) => handleCreateLocalComments(store, args)
   );
 }
 

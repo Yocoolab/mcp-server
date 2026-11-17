@@ -460,7 +460,7 @@ function startServer(): void {
 
   // ─── No-account (local) comment tools — tokenless, fed by the bridge ────
   registerLocalCommentTools(server, localCommentStore);
-  registerCreateLocalComment(server, bridge.emitCreateLocalComments);
+  registerCreateLocalComment(server, localCommentStore);
   
   // ─── AI Assistant tools (require YOCOOLAB_TOKEN) ────────────────────────
   

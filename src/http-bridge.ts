@@ -548,6 +548,16 @@ export function startHttpBridge(port: number, store: SelectionStore, localStore?
 
     server.listen(port, '127.0.0.1', () => {
       process.stderr.write(`[yocoolab] HTTP bridge listening on http://127.0.0.1:${port}\n`);
+      // Only the process that owns the bridge drains the agent→extension create
+      // queue and pushes to connected panels. When no panel is connected, the
+      // pins stay queued (not lost) until one is.
+      if (localStore) {
+        setInterval(() => {
+          if (sseClients.size === 0) return;
+          const items = localStore.drainCreates();
+          if (items.length) emitCreateLocalComments(items);
+        }, 1500).unref?.();
+      }
     });
   }
 
