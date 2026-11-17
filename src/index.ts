@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { YocoolabApiClient } from './api-client.js';
 import { GitHubClient } from './github-client.js';
 import { SelectionStore } from './selection-store.js';
+import { LocalCommentStore } from './local-comment-store.js';
 import { startHttpBridge } from './http-bridge.js';
 import { handleListThreads } from './tools/list-threads.js';
 import { handleGetContext } from './tools/get-context.js';
@@ -24,6 +25,7 @@ import { registerGetLatestSelection } from './tools/get-latest-selection.js';
 import { registerGetSelectionHistory } from './tools/get-selection-history.js';
 import { registerFindSourceForSelection } from './tools/find-source-for-selection.js';
 import { registerGetElementContext } from './tools/get-element-context.js';
+import { registerLocalCommentTools, registerCreateLocalComment } from './tools/local-comments.js';
 import { handleAiAnalyzePage } from './tools/ai-analyze-page.js';
 import { handleGetAiConversations } from './tools/ai-conversations.js';
 import { PendoClient } from './pendo-client.js';
@@ -133,7 +135,8 @@ function startServer(): void {
   
   // Initialize Bridge infrastructure
   const selectionStore = new SelectionStore(50);
-  const bridge = startHttpBridge(YOCOOLAB_BRIDGE_PORT, selectionStore);
+  const localCommentStore = new LocalCommentStore();
+  const bridge = startHttpBridge(YOCOOLAB_BRIDGE_PORT, selectionStore, localCommentStore);
   const { emitThreadUpdate, getCompanionMessages, postCompanionReply } = bridge;
   
   // ─── Register this agent with the bridge ────────────────────────────
@@ -454,6 +457,10 @@ function startServer(): void {
   registerGetSelectionHistory(server, selectionStore);
   registerFindSourceForSelection(server, selectionStore, YOCOOLAB_BRIDGE_WORKSPACE, api);
   registerGetElementContext(server, selectionStore, YOCOOLAB_BRIDGE_WORKSPACE, api);
+
+  // ─── No-account (local) comment tools — tokenless, fed by the bridge ────
+  registerLocalCommentTools(server, localCommentStore);
+  registerCreateLocalComment(server, bridge.emitCreateLocalComments);
   
   // ─── AI Assistant tools (require YOCOOLAB_TOKEN) ────────────────────────
   

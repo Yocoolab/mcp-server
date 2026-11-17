@@ -2,6 +2,7 @@ import http from 'node:http';
 import { execFile } from 'node:child_process';
 import { v4 as uuidv4 } from 'uuid';
 import type { SelectionStore } from './selection-store.js';
+import type { LocalCommentStore } from './local-comment-store.js';
 
 export interface ConnectedAgent {
   id: string;
@@ -63,6 +64,8 @@ export interface BridgeResult {
   getCompanionMessages: () => CompanionMessage[];
   postCompanionReply: (content: string) => void;
   onCompanionMessage: (callback: (msg: CompanionMessage) => void) => void;
+  /** Push agent-created pins to the extension over SSE; returns the client count reached. */
+  emitCreateLocalComments: (items: Array<Record<string, unknown>>) => number;
 }
 
 /**
@@ -102,7 +105,7 @@ function notifySelection(tag: string, text: string, pageUrl: string): void {
   notify(`${label} on ${urlPath}`, 'Yocoolab Bridge', 'Element captured', 'Notification');
 }
 
-export function startHttpBridge(port: number, store: SelectionStore): BridgeResult {
+export function startHttpBridge(port: number, store: SelectionStore, localStore?: LocalCommentStore): BridgeResult {
   // SSE client connections
   const sseClients = new Set<http.ServerResponse>();
 
@@ -137,6 +140,19 @@ export function startHttpBridge(port: number, store: SelectionStore): BridgeResu
         sseClients.delete(client);
       }
     }
+  }
+
+  /** Push agent-created pins to the extension over SSE — the reverse of the
+   *  comment push. The extension writes them into its own local store; nothing
+   *  goes to a server. Used by the create_local_comments tool (Meeting → pins). */
+  function emitCreateLocalComments(items: Array<Record<string, unknown>>): number {
+    const payload = JSON.stringify({ items });
+    process.stderr.write(`[yocoolab] SSE local_comments_create: ${items.length} → ${sseClients.size} client(s)\n`);
+    for (const client of sseClients) {
+      try { client.write(`event: local_comments_create\ndata: ${payload}\n\n`); }
+      catch { sseClients.delete(client); }
+    }
+    return sseClients.size;
   }
 
   function emitCompanionReply(content: string): void {
@@ -290,6 +306,39 @@ export function startHttpBridge(port: number, store: SelectionStore): BridgeResu
           );
         } catch (e) {
           process.stderr.write(`[yocoolab] Parse error: ${e}\n`);
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        }
+      });
+      return;
+    }
+
+    // POST /local-comments — the person's no-account comments for one page,
+    // pushed by the extension whenever they change. Tokenless, same local-only
+    // trust as /event; the local-comment MCP tools read from this store.
+    if (req.method === 'POST' && url.pathname === '/local-comments') {
+      let body = '';
+      req.on('data', (chunk: string) => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body);
+          if (!isValidLocalComments(payload)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid payload' }));
+            return;
+          }
+          // Credentials never enter the store: it is served to every local
+          // caller. Strip anything an older build might have attached.
+          const p = payload as Record<string, unknown>;
+          delete p.auth;
+          const origin = String(p.origin);
+          const threads = Array.isArray(p.threads) ? (p.threads as Array<Record<string, unknown>>) : [];
+          localStore?.set(origin, { page: p.page as { url?: string; title?: string } | undefined, threads });
+          process.stderr.write(`[yocoolab] Local comments: ${threads.length} thread(s) for ${origin}\n`);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, count: threads.length }));
+        } catch (e) {
+          process.stderr.write(`[yocoolab] Local-comments parse error: ${e}\n`);
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Invalid JSON' }));
         }
@@ -504,7 +553,7 @@ export function startHttpBridge(port: number, store: SelectionStore): BridgeResu
 
   tryListen();
 
-  return { server, emitThreadUpdate, getCompanionMessages, postCompanionReply, onCompanionMessage };
+  return { server, emitThreadUpdate, getCompanionMessages, postCompanionReply, onCompanionMessage, emitCreateLocalComments };
 }
 
 /**
@@ -531,6 +580,7 @@ type RouteAudience = 'page' | 'extension' | 'local';
 function routeAudience(method: string, pathname: string): RouteAudience {
   if (method === 'GET' && (pathname === '/health' || pathname === '/agents')) return 'page';
   if (method === 'POST' && pathname === '/event') return 'extension';
+  if (method === 'POST' && pathname === '/local-comments') return 'extension';
   if (method === 'GET' && pathname === '/thread-updates') return 'extension';
   return 'local';
 }
@@ -573,4 +623,11 @@ function isValidPayload(data: unknown): boolean {
     typeof d.element === 'object' &&
     typeof d.page === 'object'
   );
+}
+
+/** A local-comments push: an origin and an array of threads. */
+function isValidLocalComments(data: unknown): boolean {
+  if (typeof data !== 'object' || data === null) return false;
+  const d = data as Record<string, unknown>;
+  return typeof d.origin === 'string' && d.origin.length > 0 && Array.isArray(d.threads);
 }
