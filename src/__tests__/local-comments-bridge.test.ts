@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
 import { SelectionStore } from '../selection-store.js';
 import { LocalCommentStore } from '../local-comment-store.js';
 import { startHttpBridge, type BridgeResult } from '../http-bridge.js';
@@ -22,7 +25,9 @@ describe('POST /local-comments', () => {
   let port: number;
 
   beforeEach(async () => {
-    local = new LocalCommentStore();
+    const f = path.join(os.tmpdir(), `yc-bridge-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    try { fs.rmSync(f, { force: true }); } catch { /* ignore */ }
+    local = new LocalCommentStore(f);
     bridge = startHttpBridge(0, new SelectionStore(), local);
     await new Promise<void>((r) => bridge.server.once('listening', () => { port = (bridge.server.address() as { port: number }).port; r(); }));
   });

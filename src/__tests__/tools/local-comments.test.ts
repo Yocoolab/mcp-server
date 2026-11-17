@@ -1,6 +1,17 @@
 import { describe, it, expect } from 'vitest';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
 import { LocalCommentStore } from '../../local-comment-store.js';
 import { handleListLocalThreads, handleGetLocalComments, handleCreateLocalComments } from '../../tools/local-comments.js';
+
+let n = 0;
+/** A store backed by a unique temp file, so tests never share the real shared file. */
+function freshStore(): LocalCommentStore {
+  const f = path.join(os.tmpdir(), `yc-tools-test-${process.pid}-${Date.now()}-${n++}.json`);
+  try { fs.rmSync(f, { force: true }); } catch { /* ignore */ }
+  return new LocalCommentStore(f);
+}
 
 function thread(id: string, over: Record<string, unknown> = {}) {
   return {
@@ -14,12 +25,12 @@ function thread(id: string, over: Record<string, unknown> = {}) {
 
 describe('list_local_threads', () => {
   it('invites the person to comment when the store is empty', () => {
-    const r = handleListLocalThreads(new LocalCommentStore(), {});
+    const r = handleListLocalThreads(freshStore(), {});
     expect(r.content[0].text).toMatch(/no account|without an account|No local comments/i);
   });
 
   it('lists open threads with element, selector and page', () => {
-    const s = new LocalCommentStore();
+    const s = freshStore();
     s.set('https://shop.com', { threads: [thread('t1')] });
     const r = handleListLocalThreads(s, {});
     expect(r.content[0].text).toContain('t1');
@@ -29,14 +40,14 @@ describe('list_local_threads', () => {
   });
 
   it('hides resolved threads unless include_resolved is set', () => {
-    const s = new LocalCommentStore();
+    const s = freshStore();
     s.set('https://shop.com', { threads: [thread('open1'), thread('done1', { status: 'resolved' })] });
     expect(handleListLocalThreads(s, {}).content[0].text).not.toContain('done1');
     expect(handleListLocalThreads(s, { include_resolved: true }).content[0].text).toContain('done1');
   });
 
   it('filters by origin', () => {
-    const s = new LocalCommentStore();
+    const s = freshStore();
     s.set('https://a.com', { threads: [thread('a1')] });
     s.set('https://b.com', { threads: [thread('b1')] });
     const r = handleListLocalThreads(s, { origin: 'https://b.com' });
@@ -45,7 +56,7 @@ describe('list_local_threads', () => {
   });
 
   it('marks threads handed off to an agent as pending, and pending_only filters to them', () => {
-    const s = new LocalCommentStore();
+    const s = freshStore();
     s.set('https://shop.com', { threads: [
       thread('p1', { claude_code_pending: true, target_agent_type: 'claude-code' }),
       thread('idle1'),
@@ -58,7 +69,7 @@ describe('list_local_threads', () => {
   });
 
   it('pending_only with nothing pending explains how a comment becomes pending', () => {
-    const s = new LocalCommentStore();
+    const s = freshStore();
     s.set('https://shop.com', { threads: [thread('idle1')] });
     expect(handleListLocalThreads(s, { pending_only: true }).content[0].text).toMatch(/Agent Build It|pending/i);
   });
@@ -66,7 +77,7 @@ describe('list_local_threads', () => {
 
 describe('get_local_comments', () => {
   it('returns full detail (xpath, context, conversation) for a thread id', () => {
-    const s = new LocalCommentStore();
+    const s = freshStore();
     s.set('https://shop.com', { threads: [thread('t1', { messages: [{ content: 'make it green', author_name: 'You' }, { content: 'and bigger', author_name: 'You' }] })] });
     const r = handleGetLocalComments(s, { thread_id: 't1' });
     expect(r.content[0].text).toContain('//button[@id="t1"]');
@@ -75,7 +86,7 @@ describe('get_local_comments', () => {
   });
 
   it('falls back to all open threads on the most-recent page', () => {
-    const s = new LocalCommentStore();
+    const s = freshStore();
     s.set('https://shop.com', { threads: [thread('t1'), thread('t2')] });
     const r = handleGetLocalComments(s, {});
     expect(r.content[0].text).toContain('2 open local comment');
@@ -84,7 +95,7 @@ describe('get_local_comments', () => {
   });
 
   it('reports a clear miss for an unknown thread id', () => {
-    const r = handleGetLocalComments(new LocalCommentStore(), { thread_id: 'nope' });
+    const r = handleGetLocalComments(freshStore(), { thread_id: 'nope' });
     expect(r.content[0].text).toContain('nope');
   });
 });
