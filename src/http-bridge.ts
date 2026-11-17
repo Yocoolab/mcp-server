@@ -64,6 +64,8 @@ export interface BridgeResult {
   getCompanionMessages: () => CompanionMessage[];
   postCompanionReply: (content: string) => void;
   onCompanionMessage: (callback: (msg: CompanionMessage) => void) => void;
+  /** Push agent-created pins to the extension over SSE; returns the client count reached. */
+  emitCreateLocalComments: (items: Array<Record<string, unknown>>) => number;
 }
 
 /**
@@ -138,6 +140,19 @@ export function startHttpBridge(port: number, store: SelectionStore, localStore?
         sseClients.delete(client);
       }
     }
+  }
+
+  /** Push agent-created pins to the extension over SSE — the reverse of the
+   *  comment push. The extension writes them into its own local store; nothing
+   *  goes to a server. Used by the create_local_comments tool (Meeting → pins). */
+  function emitCreateLocalComments(items: Array<Record<string, unknown>>): number {
+    const payload = JSON.stringify({ items });
+    process.stderr.write(`[yocoolab] SSE local_comments_create: ${items.length} → ${sseClients.size} client(s)\n`);
+    for (const client of sseClients) {
+      try { client.write(`event: local_comments_create\ndata: ${payload}\n\n`); }
+      catch { sseClients.delete(client); }
+    }
+    return sseClients.size;
   }
 
   function emitCompanionReply(content: string): void {
@@ -538,7 +553,7 @@ export function startHttpBridge(port: number, store: SelectionStore, localStore?
 
   tryListen();
 
-  return { server, emitThreadUpdate, getCompanionMessages, postCompanionReply, onCompanionMessage };
+  return { server, emitThreadUpdate, getCompanionMessages, postCompanionReply, onCompanionMessage, emitCreateLocalComments };
 }
 
 /**

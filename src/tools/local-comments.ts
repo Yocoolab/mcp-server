@@ -18,7 +18,10 @@ function str(v: unknown): string {
 function renderThread(origin: string, t: Record<string, unknown>, opts: { full: boolean }): string {
   const lines: string[] = [];
   const first = str(t.first_message || t.first_message_content);
-  lines.push(`**Thread ${str(t.id)}** — ${str(t.status) || 'open'}${t.priority && t.priority !== 'normal' ? ` · ${str(t.priority)}` : ''}`);
+  const pending = t.claude_code_pending === true || t.claude_code_pending === 'true';
+  const agent = str(t.target_agent_type);
+  const pendingMark = pending ? ` · pending for ${agent || 'an agent'}` : '';
+  lines.push(`**Thread ${str(t.id)}** — ${str(t.status) || 'open'}${t.priority && t.priority !== 'normal' ? ` · ${str(t.priority)}` : ''}${pendingMark}`);
   if (first) lines.push(`  “${first}”`);
 
   // Where on the page — enough for the agent to find the source.
@@ -52,19 +55,24 @@ function renderThread(origin: string, t: Record<string, unknown>, opts: { full: 
 
 type ToolResult = { content: Array<{ type: 'text'; text: string }> };
 
+const isPending = (t: Record<string, unknown>): boolean => t.claude_code_pending === true || t.claude_code_pending === 'true';
+
 /** list_local_threads — summary of the person's no-account comments. */
-export function handleListLocalThreads(store: LocalCommentStore, args: { origin?: string; include_resolved?: boolean }): ToolResult {
+export function handleListLocalThreads(store: LocalCommentStore, args: { origin?: string; include_resolved?: boolean; pending_only?: boolean }): ToolResult {
   let rows = store.allThreads();
   if (args.origin) rows = rows.filter((r) => r.origin === args.origin);
   if (!args.include_resolved) rows = rows.filter((r) => str(r.thread.status) !== 'resolved');
+  if (args.pending_only) rows = rows.filter((r) => isPending(r.thread));
 
   if (rows.length === 0) {
     return {
       content: [{
         type: 'text' as const,
-        text: store.count() === 0
-          ? 'No local comments yet. The person can leave feedback without an account: click the Yocoolab icon on any page, then click an element and type a comment — it appears here with no sign-in.'
-          : 'No matching open local threads. Pass include_resolved: true to see resolved ones, or drop the origin filter.',
+        text: args.pending_only
+          ? 'Nothing is pending for an agent right now. The person hands a comment off with "Agent Build It" in the panel; it then shows here as pending.'
+          : store.count() === 0
+            ? 'No local comments yet. The person can leave feedback without an account: click the Yocoolab icon on any page, then click an element and type a comment — it appears here with no sign-in.'
+            : 'No matching open local threads. Pass include_resolved: true to see resolved ones, or drop the origin filter.',
       }],
     };
   }
@@ -106,15 +114,70 @@ export function handleGetLocalComments(store: LocalCommentStore, args: { thread_
   return { content: [{ type: 'text' as const, text: blocks.join('\n') }] };
 }
 
+/**
+ * create_local_comments — the agent creates no-account pins in the person's
+ * browser (e.g. from a meeting transcript). Sent to the extension over the
+ * bridge's SSE channel; the extension writes them into its own local store.
+ * Nothing touches a server. `emit` returns how many extension clients received.
+ */
+type CreateArgs = { comments: Array<{ comment: string; page_url?: string; selector?: string; element_tag?: string; element_text?: string; priority?: string }> };
+
+/** create_local_comments handler — maps items and pushes them to the extension. */
+export function handleCreateLocalComments(emit: (items: Array<Record<string, unknown>>) => number, args: CreateArgs): ToolResult {
+  const items = (args.comments || [])
+    .filter((c) => c && c.comment && c.comment.trim())
+    .map((c) => ({
+      message: c.comment.trim(),
+      page_url: c.page_url || null,
+      selector: c.selector || null,
+      element_tag: c.element_tag || null,
+      element_text: c.element_text || null,
+      priority: c.priority === 'low' || c.priority === 'high' ? c.priority : 'normal',
+      tags: ['from-meeting'],
+      source: 'agent',
+    }));
+  if (items.length === 0) {
+    return { content: [{ type: 'text' as const, text: 'No valid comments to create — each needs a non-empty comment.' }] };
+  }
+  const clients = emit(items);
+  return {
+    content: [{
+      type: 'text' as const,
+      text: clients > 0
+        ? `Sent ${items.length} pin(s) to the person's browser — they appear in the Yocoolab panel on the matching page${items.some((i) => !i.page_url) ? ' (items without a page_url land on whichever page they have open)' : ''}.`
+        : `Prepared ${items.length} pin(s), but no Yocoolab panel is listening. Ask the person to open the Yocoolab panel on the page (click the extension icon), then run this again.`,
+    }],
+  };
+}
+
+export function registerCreateLocalComment(server: McpServer, emit: (items: Array<Record<string, unknown>>) => number): void {
+  server.tool(
+    'create_local_comments',
+    'Create no-account ("local") Yocoolab pins in the person\'s browser — for example, turning a meeting transcript into pinned feedback. No Yocoolab token or account: the pins are written to the person\'s own browser over the local bridge, nothing is sent to a server. Give each item the page it belongs on and a clear comment; add a CSS selector when you can infer one so the pin lands on the element. The person must have the Yocoolab panel open on that page to receive them.',
+    {
+      comments: z.array(z.object({
+        comment: z.string().describe('The feedback as actionable text.'),
+        page_url: z.string().optional().describe('Full URL of the page this pin belongs on. Required for the pin to land on the right site.'),
+        selector: z.string().optional().describe('CSS selector for the element, when you can infer one.'),
+        element_tag: z.string().optional().describe('Element tag, e.g. "BUTTON".'),
+        element_text: z.string().optional().describe('Visible text of the element, to help locate it.'),
+        priority: z.enum(['low', 'normal', 'high']).optional(),
+      })).describe('The pins to create.'),
+    },
+    async (args: CreateArgs) => handleCreateLocalComments(emit, args)
+  );
+}
+
 export function registerLocalCommentTools(server: McpServer, store: LocalCommentStore): void {
   server.tool(
     'list_local_threads',
-    'Lists the person\'s no-account ("local") Yocoolab comments — visual feedback they left on a page without signing in, pushed from the Chrome extension over the local bridge. No Yocoolab token needed. Each thread carries the element (tag, selector, xpath), the comment text, and the page URL, so you can locate the code it refers to. This is the same feedback as the "Copy for your agent" button, handed to you directly. Use get_local_comments for a thread\'s full detail.',
+    'Lists the person\'s no-account ("local") Yocoolab comments — visual feedback they left on a page without signing in, pushed from the Chrome extension over the local bridge. No Yocoolab token needed. Each thread carries the element (tag, selector, xpath), the comment text, and the page URL, so you can locate the code it refers to. Threads the person handed off with "Agent Build It" are marked "pending for <agent>" — use pending_only: true for just your to-do list. This is the same feedback as the "Copy for your agent" button, handed to you directly. Use get_local_comments for a thread\'s full detail.',
     {
       origin: z.string().optional().describe('Only threads from this page origin (e.g. "https://example.com"). Omit for every origin.'),
       include_resolved: z.boolean().optional().describe('Include resolved/done threads too. Default: only open ones.'),
+      pending_only: z.boolean().optional().describe('Only threads the person explicitly handed off to an agent ("Agent Build It") — your to-do list.'),
     },
-    async (args: { origin?: string; include_resolved?: boolean }) => handleListLocalThreads(store, args)
+    async (args: { origin?: string; include_resolved?: boolean; pending_only?: boolean }) => handleListLocalThreads(store, args)
   );
 
   server.tool(

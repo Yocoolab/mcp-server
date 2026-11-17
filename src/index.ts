@@ -25,7 +25,7 @@ import { registerGetLatestSelection } from './tools/get-latest-selection.js';
 import { registerGetSelectionHistory } from './tools/get-selection-history.js';
 import { registerFindSourceForSelection } from './tools/find-source-for-selection.js';
 import { registerGetElementContext } from './tools/get-element-context.js';
-import { registerLocalCommentTools } from './tools/local-comments.js';
+import { registerLocalCommentTools, registerCreateLocalComment } from './tools/local-comments.js';
 import { handleAiAnalyzePage } from './tools/ai-analyze-page.js';
 import { handleGetAiConversations } from './tools/ai-conversations.js';
 import { PendoClient } from './pendo-client.js';
@@ -460,6 +460,7 @@ function startServer(): void {
 
   // ─── No-account (local) comment tools — tokenless, fed by the bridge ────
   registerLocalCommentTools(server, localCommentStore);
+  registerCreateLocalComment(server, bridge.emitCreateLocalComments);
   
   // ─── AI Assistant tools (require YOCOOLAB_TOKEN) ────────────────────────
   
