@@ -14,6 +14,14 @@ function str(v: unknown): string {
   return v == null ? '' : String(v);
 }
 
+/** Like str, but JSON-encodes objects/arrays so context fields don't render as
+ *  "[object Object]" — the agent needs the actual element/view context. */
+function ctxStr(v: unknown): string {
+  if (v == null) return '';
+  if (typeof v === 'object') { try { return JSON.stringify(v); } catch { return ''; } }
+  return String(v);
+}
+
 /** One thread rendered as a readable block for the agent. */
 function renderThread(origin: string, t: Record<string, unknown>, opts: { full: boolean }): string {
   const lines: string[] = [];
@@ -37,9 +45,9 @@ function renderThread(origin: string, t: Record<string, unknown>, opts: { full: 
   else lines.push(`  page origin: ${origin}`);
 
   if (opts.full) {
-    const ctx = str(t.element_context);
+    const ctx = ctxStr(t.element_context);
     if (ctx) lines.push(`  element context: ${ctx.slice(0, 600)}`);
-    const view = str(t.view_context);
+    const view = ctxStr(t.view_context);
     if (view) lines.push(`  view context: ${view.slice(0, 400)}`);
     const msgs = Array.isArray(t.messages) ? (t.messages as Array<Record<string, unknown>>) : [];
     if (msgs.length > 1) {
